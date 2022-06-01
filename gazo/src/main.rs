@@ -573,7 +573,7 @@ fn main()
 
 	loop
 	{
-		event_queue.blocking_dispatch(&mut state);
+		event_queue.blocking_dispatch(&mut state).unwrap();
 	}
 }
 
