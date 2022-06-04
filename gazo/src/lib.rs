@@ -1,11 +1,10 @@
 use std::{
 	ffi, fs,
-	io::{self, Read, Write},
+	io::{Read, Write},
 	os::unix::io::FromRawFd,
 };
 
 use nix::sys::memfd;
-use regex::Regex;
 use wayland_client::{
 	self,
 	protocol::{wl_buffer, wl_callback, wl_output, wl_registry, wl_shm, wl_shm_pool},
@@ -18,7 +17,7 @@ use wayland_protocols_wlr::screencopy::v1::client::{
 
 // use image::
 
-struct QrodeOutputInfo
+struct OutputInfo
 {
 	wl_output: wl_output::WlOutput,
 	logical_position: Option<(i32, i32)>,
@@ -26,6 +25,7 @@ struct QrodeOutputInfo
 	transform: Option<wl_output::Transform>,
 	image_file: Option<fs::File>, // file is backed by RAM
 	image_size: Option<(i32, i32)>,
+	image_ready: bool
 }
 
 struct State
@@ -34,7 +34,7 @@ struct State
 	wlr_screencopy_manager: Option<zwlr_screencopy_manager_v1::ZwlrScreencopyManagerV1>,
 	xdg_output_manager: Option<zxdg_output_manager_v1::ZxdgOutputManagerV1>,
 	wl_shm: Option<wl_shm::WlShm>,
-	qrode_output_infos: Vec<QrodeOutputInfo>,
+	output_infos: Vec<OutputInfo>,
 }
 
 impl Dispatch<wl_registry::WlRegistry, ()> for State
@@ -101,17 +101,18 @@ impl Dispatch<wl_registry::WlRegistry, ()> for State
 							name,
 							4,
 							queue_handle,
-							self.qrode_output_infos.len(),
+							self.output_infos.len(),
 						)
 						.unwrap();
 
-					self.qrode_output_infos.push(QrodeOutputInfo {
+					self.output_infos.push(OutputInfo {
 						wl_output,
 						logical_position: None,
 						logical_size: None,
 						transform: None,
 						image_file: None,
 						image_size: None,
+						image_ready: false,
 					});
 
 					println!("Got wl_output");
@@ -189,7 +190,7 @@ impl Dispatch<wl_output::WlOutput, usize> for State
 		if let wl_output::Event::Geometry { transform, .. } = event
 		{
 			println!("Transform: {:?}", transform);
-			self.qrode_output_infos[*index].transform = transform.into_result().ok();
+			self.output_infos[*index].transform = transform.into_result().ok();
 		}
 	}
 }
@@ -211,11 +212,11 @@ impl Dispatch<zxdg_output_v1::ZxdgOutputV1, usize> for State
 		{
 			zxdg_output_v1::Event::LogicalPosition { x, y } =>
 			{
-				self.qrode_output_infos[*index].logical_position = Some((x, y));
+				self.output_infos[*index].logical_position = Some((x, y));
 			}
 			zxdg_output_v1::Event::LogicalSize { width, height } =>
 			{
-				self.qrode_output_infos[*index].logical_size = Some((width, height));
+				self.output_infos[*index].logical_size = Some((width, height));
 			}
 			_ =>
 			{}
@@ -252,13 +253,13 @@ impl Dispatch<zwlr_screencopy_frame_v1::ZwlrScreencopyFrameV1, usize> for State
 				.unwrap();
 
 				// qrode_screencopy_frame.raw_fd = Some(raw_fd);
-				self.qrode_output_infos[*index].image_file =
+				self.output_infos[*index].image_file =
 					Some(unsafe { fs::File::from_raw_fd(raw_fd) });
-				self.qrode_output_infos[*index].image_size = Some((width as i32, height as i32));
+				self.output_infos[*index].image_size = Some((width as i32, height as i32));
 
 				println!("258: width: {}, height: {}", width, height);
 				// TODO: handle other pixel formats
-				self.qrode_output_infos[*index]
+				self.output_infos[*index]
 					.image_file
 					.as_mut()
 					.unwrap()
@@ -292,17 +293,18 @@ impl Dispatch<zwlr_screencopy_frame_v1::ZwlrScreencopyFrameV1, usize> for State
 				tv_nsec: _,
 			} =>
 			{
-				let qrode_output_info = &mut self.qrode_output_infos[*index];
+				let output_info = &mut self.output_infos[*index];
+				
 				// let mut image_file =
 				// unsafe{fs::File::from_raw_fd(qrode_screencopy_frame.raw_fd.unwrap())};
-				let image_file = qrode_output_info.image_file.as_mut().unwrap();
+				let image_file = output_info.image_file.as_mut().unwrap();
 				// image_file.rewind();
 
 				let mut tmp_file =
 					fs::File::create(format!("/tmp/qrode/output{}.ppm", *index)).unwrap();
 
 				// io::copy(image_file, &mut tmp_file);
-				let image_size = qrode_output_info.image_size.as_ref().unwrap();
+				let image_size = output_info.image_size.as_ref().unwrap();
 
 				// TODO: handle alternate buffer formats
 				let mut buffer = vec![0_u8; (image_size.0 * image_size.1 * 4) as usize];
@@ -335,6 +337,7 @@ impl Dispatch<zwlr_screencopy_frame_v1::ZwlrScreencopyFrameV1, usize> for State
 
 				// self.output_done_events += 1;
 				println!("Ready");
+				output_info.image_ready = true;
 			}
 			zwlr_screencopy_frame_v1::Event::BufferDone =>
 			{
@@ -346,12 +349,12 @@ impl Dispatch<zwlr_screencopy_frame_v1::ZwlrScreencopyFrameV1, usize> for State
 				// memfd::MemFdCreateFlag::MFD_ALLOW_SEALING         ).unwrap();
 
 				// //qrode_screencopy_frame.raw_fd = Some(raw_fd);
-				// self.qrode_output_infos[*index].image_file =
-				// Some(unsafe{fs::File::from_raw_fd(raw_fd)}); self.qrode_output_infos[*index].
+				// self.output_infos[*index].image_file =
+				// Some(unsafe{fs::File::from_raw_fd(raw_fd)}); self.output_infos[*index].
 				// image_size = Some((width as i32, height as i32));
 
 				// // TODO: handle other pixel formats
-				// self.qrode_output_infos[*index].image_file.as_mut().unwrap().set_len((width *
+				// self.output_infos[*index].image_file.as_mut().unwrap().set_len((width *
 				// height * 4) as u64);
 
 				// let wl_shm_pool = self.wl_shm.as_ref().unwrap().create_pool(raw_fd, (width *
@@ -433,7 +436,7 @@ pub fn capture_desktop(position: (i32, i32), size: (i32, i32))
 		wlr_screencopy_manager: None,
 		xdg_output_manager: None,
 		wl_shm: None,
-		qrode_output_infos: Vec::new(),
+		output_infos: Vec::new(),
 	};
 
 	// run until initial done event and done event has been sent for all wl_outputs
@@ -443,52 +446,45 @@ pub fn capture_desktop(position: (i32, i32), size: (i32, i32))
 	}
 
 	// get xdg output for logical position and size
-	for (i, qrode_output_info) in state.qrode_output_infos.iter_mut().enumerate()
+	for (i, output_info) in state.output_infos.iter_mut().enumerate()
 	{
 		state
 			.xdg_output_manager
 			.as_ref()
 			.unwrap()
-			.get_xdg_output(&qrode_output_info.wl_output, &event_queue.handle(), i)
+			.get_xdg_output(&output_info.wl_output, &event_queue.handle(), i)
 			.ok();
 		println!("GET XDG OUTPUT");
 	}
 
 	// run until all information about the outputs has been sent
-	while state.qrode_output_infos.iter().any(|qrode_output_info| {
-		qrode_output_info.logical_position.is_none()
-			|| qrode_output_info.logical_size.is_none()
-			|| qrode_output_info.transform.is_none()
+	while state.output_infos.iter().any(|output_info| {
+		output_info.logical_position.is_none()
+			|| output_info.logical_size.is_none()
+			|| output_info.transform.is_none()
 	})
 	{
 		event_queue.blocking_dispatch(&mut state).unwrap();
 	}
 
 	// request capture of screen
-	for (i, qrode_output_info) in state.qrode_output_infos.iter().enumerate()
+	for (i, output_info) in state.output_infos.iter().enumerate()
 	{
 		let Rectangle { position, size } = match box_output_intersection_local_coordinates(
 			SelectionBox(Rectangle { position, size }),
 			OutputBox(Rectangle {
-				position: qrode_output_info.logical_position.unwrap(),
-				size: qrode_output_info.logical_size.unwrap(),
+				position: output_info.logical_position.unwrap(),
+				size: output_info.logical_size.unwrap(),
 			}),
 		)
 		{
 			Some(rectangle) => rectangle,
 			None => continue,
 		};
-		// let relative_position = (cmp::max(position.0 -
-		// qrode_output_info.logical_position.as_ref().unwrap().0, 0), cmp::max(position.1 -
-		// qrode_output_info.logical_position.as_ref().unwrap().1, 0)); let relative_size =
-		// (cmp::min(qrode_output_info.logical_size.as_ref().unwrap().0 - relative_position.0,
-		// size.0 + position.0 - qrode_output_info.logical_position.as_ref().unwrap().0),
-		// cmp::min(qrode_output_info.logical_size.as_ref().unwrap().1 - relative_position.1, size.1
-		// + position.1 - qrode_output_info.logical_position.as_ref().unwrap().1));
 
 		println!("position: {:?}, size: {:?}", position, size);
 		// TODO: account for logical position and size
-		match qrode_output_info.transform.as_ref().unwrap()
+		match output_info.transform.as_ref().unwrap()
 		{
 			wl_output::Transform::Normal =>
 			{
@@ -498,7 +494,7 @@ pub fn capture_desktop(position: (i32, i32), size: (i32, i32))
 					.unwrap()
 					.capture_output_region(
 						0,
-						&qrode_output_info.wl_output,
+						&output_info.wl_output,
 						position.0,
 						position.1,
 						size.0,
@@ -516,11 +512,11 @@ pub fn capture_desktop(position: (i32, i32), size: (i32, i32))
 			{
 				// transforms position so it starts at top left
 				let position = (
-					qrode_output_info.logical_size.as_ref().unwrap().0 - size.0 - position.0,
-					qrode_output_info.logical_size.as_ref().unwrap().1 - size.1 - position.1,
+					output_info.logical_size.as_ref().unwrap().0 - size.0 - position.0,
+					output_info.logical_size.as_ref().unwrap().1 - size.1 - position.1,
 				);
-				// let position = (qrode_output_info.logical_size.as_ref().unwrap().0 - position.0 -
-				// size.0, qrode_output_info.logical_size.as_ref().unwrap().1 - position.1);
+				// let position = (output_info.logical_size.as_ref().unwrap().0 - position.0 -
+				// size.0, output_info.logical_size.as_ref().unwrap().1 - position.1);
 				// let size = (-size.0, -size.1);
 
 				state
@@ -529,7 +525,7 @@ pub fn capture_desktop(position: (i32, i32), size: (i32, i32))
 					.unwrap()
 					.capture_output_region(
 						0,
-						&qrode_output_info.wl_output,
+						&output_info.wl_output,
 						position.0,
 						position.1,
 						size.0,
@@ -546,9 +542,11 @@ pub fn capture_desktop(position: (i32, i32), size: (i32, i32))
 		}
 	}
 
-	loop
+	while state.output_infos.iter().any(|output_info| {!output_info.image_ready})
 	{
+		println!("Before");
 		event_queue.blocking_dispatch(&mut state).unwrap();
+		println!("After");
 	}
 }
 
