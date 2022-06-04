@@ -16,6 +16,7 @@ use wayland_protocols_wlr::screencopy::v1::client::{
 };
 
 // use image::
+mod rectangle;
 
 struct OutputInfo
 {
@@ -25,7 +26,7 @@ struct OutputInfo
 	transform: Option<wl_output::Transform>,
 	image_file: Option<fs::File>, // file is backed by RAM
 	image_size: Option<(i32, i32)>,
-	image_ready: bool
+	image_ready: bool,
 }
 
 struct State
@@ -294,7 +295,7 @@ impl Dispatch<zwlr_screencopy_frame_v1::ZwlrScreencopyFrameV1, usize> for State
 			} =>
 			{
 				let output_info = &mut self.output_infos[*index];
-				
+
 				// let mut image_file =
 				// unsafe{fs::File::from_raw_fd(qrode_screencopy_frame.raw_fd.unwrap())};
 				let image_file = output_info.image_file.as_mut().unwrap();
@@ -470,17 +471,18 @@ pub fn capture_desktop(position: (i32, i32), size: (i32, i32))
 	// request capture of screen
 	for (i, output_info) in state.output_infos.iter().enumerate()
 	{
-		let Rectangle { position, size } = match box_output_intersection_local_coordinates(
-			SelectionBox(Rectangle { position, size }),
-			OutputBox(Rectangle {
+		let rectangle::Rectangle { position, size } =
+			match rectangle::OutputBox(rectangle::Rectangle {
 				position: output_info.logical_position.unwrap(),
 				size: output_info.logical_size.unwrap(),
-			}),
-		)
-		{
-			Some(rectangle) => rectangle,
-			None => continue,
-		};
+			})
+			.selection_intersection_local_coordinates(rectangle::SelectionBox(
+				rectangle::Rectangle { position, size },
+			))
+			{
+				Some(rectangle) => rectangle,
+				None => continue,
+			};
 
 		println!("position: {:?}, size: {:?}", position, size);
 		// TODO: account for logical position and size
@@ -542,117 +544,13 @@ pub fn capture_desktop(position: (i32, i32), size: (i32, i32))
 		}
 	}
 
-	while state.output_infos.iter().any(|output_info| {!output_info.image_ready})
+	while state
+		.output_infos
+		.iter()
+		.any(|output_info| !output_info.image_ready)
 	{
 		println!("Before");
 		event_queue.blocking_dispatch(&mut state).unwrap();
 		println!("After");
 	}
-}
-
-struct Rectangle
-{
-	position: (i32, i32),
-	size: (i32, i32),
-}
-
-struct SelectionBox(Rectangle);
-struct OutputBox(Rectangle);
-
-fn box_output_intersection_local_coordinates(
-	selection_box: SelectionBox,
-	output_box: OutputBox,
-) -> Option<Rectangle>
-{
-	let SelectionBox(selection_box_rectangle) = selection_box;
-	let OutputBox(output_box_rectangle) = output_box;
-
-	let mut position: (Option<i32>, Option<i32>) = (None, None);
-	let mut size: (Option<i32>, Option<i32>) = (None, None);
-
-	if (output_box_rectangle.position.0
-		..=output_box_rectangle.position.0 + output_box_rectangle.size.0)
-		.contains(&selection_box_rectangle.position.0)
-	{
-		position.0 = Some(selection_box_rectangle.position.0);
-	}
-	else if (selection_box_rectangle.position.0
-		..=selection_box_rectangle.position.0 + selection_box_rectangle.size.0)
-		.contains(&output_box_rectangle.position.0)
-	{
-		position.0 = Some(output_box_rectangle.position.0);
-	}
-	else
-	{
-		return None;
-	}
-
-	if (output_box_rectangle.position.1
-		..=output_box_rectangle.position.1 + output_box_rectangle.size.1)
-		.contains(&selection_box_rectangle.position.1)
-	{
-		position.1 = Some(selection_box_rectangle.position.1);
-	}
-	else if (selection_box_rectangle.position.1
-		..=selection_box_rectangle.position.1 + selection_box_rectangle.size.1)
-		.contains(&output_box_rectangle.position.1)
-	{
-		position.1 = Some(output_box_rectangle.position.1);
-	}
-	else
-	{
-		return None;
-	}
-
-	if (output_box_rectangle.position.0
-		..=output_box_rectangle.position.0 + output_box_rectangle.size.0)
-		.contains(&(selection_box_rectangle.position.0 + selection_box_rectangle.size.0))
-	{
-		size.0 = Some(
-			selection_box_rectangle.position.0 + selection_box_rectangle.size.0
-				- position.0.unwrap(),
-		);
-	}
-	else if (selection_box_rectangle.position.0
-		..=selection_box_rectangle.position.0 + selection_box_rectangle.size.0)
-		.contains(&(output_box_rectangle.position.0 + output_box_rectangle.size.0))
-	{
-		size.0 = Some(
-			output_box_rectangle.position.0 + output_box_rectangle.size.0 - position.0.unwrap(),
-		);
-	}
-	else
-	{
-		return None;
-	}
-
-	if (output_box_rectangle.position.1
-		..=output_box_rectangle.position.1 + output_box_rectangle.size.1)
-		.contains(&(selection_box_rectangle.position.1 + selection_box_rectangle.size.1))
-	{
-		size.1 = Some(
-			selection_box_rectangle.position.1 + selection_box_rectangle.size.1
-				- position.1.unwrap(),
-		);
-	}
-	else if (selection_box_rectangle.position.1
-		..=selection_box_rectangle.position.1 + selection_box_rectangle.size.1)
-		.contains(&(output_box_rectangle.position.1 + output_box_rectangle.size.1))
-	{
-		size.1 = Some(
-			output_box_rectangle.position.1 + output_box_rectangle.size.1 - position.1.unwrap(),
-		);
-	}
-	else
-	{
-		return None;
-	}
-
-	Some(Rectangle {
-		position: (
-			position.0.unwrap() - output_box_rectangle.position.0,
-			position.1.unwrap() - output_box_rectangle.position.1,
-		),
-		size: (size.0.unwrap(), size.1.unwrap()),
-	})
 }
