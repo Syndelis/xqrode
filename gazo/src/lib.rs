@@ -471,18 +471,20 @@ pub fn capture_desktop(position: (i32, i32), size: (i32, i32))
 	// request capture of screen
 	for (i, output_info) in state.output_infos.iter().enumerate()
 	{
-		let rectangle::Rectangle { position, size } =
-			match rectangle::OutputBox(rectangle::Rectangle {
-				position: output_info.logical_position.unwrap(),
-				size: output_info.logical_size.unwrap(),
-			})
-			.selection_intersection_local_coordinates(rectangle::SelectionBox(
-				rectangle::Rectangle { position, size },
-			))
-			{
-				Some(rectangle) => rectangle,
-				None => continue,
-			};
+		let rectangle::Rectangle { position, size } = match rectangle::Rectangle::new(
+			output_info.logical_position.unwrap(),
+			output_info.logical_size.unwrap(),
+		)
+		.get_intersection(rectangle::Rectangle { position, size })
+		{
+			Some(rectangle) => rectangle,
+			None => continue,
+		};
+
+		let position = (
+			position.0 - output_info.logical_position.unwrap().0,
+			position.1 - output_info.logical_position.unwrap().1,
+		);
 
 		println!("position: {:?}, size: {:?}", position, size);
 		// TODO: account for logical position and size
