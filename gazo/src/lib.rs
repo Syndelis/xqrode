@@ -69,8 +69,6 @@ impl Dispatch<wl_registry::WlRegistry, ()> for State
 						.unwrap();
 
 					self.wlr_screencopy_manager = Some(wlr_screencopy_manager);
-
-					println!("Got screencopy manager");
 				}
 				"zxdg_output_manager_v1" =>
 				{
@@ -84,8 +82,6 @@ impl Dispatch<wl_registry::WlRegistry, ()> for State
 						.unwrap();
 
 					self.xdg_output_manager = Some(xdg_output_manager);
-
-					println!("Got output manager");
 				}
 				"wl_shm" =>
 				{
@@ -115,13 +111,9 @@ impl Dispatch<wl_registry::WlRegistry, ()> for State
 						image_size: None,
 						image_ready: false,
 					});
-
-					println!("Got wl_output");
 				}
 				_ =>
-				{
-					// println!("{}", interface);
-				}
+				{}
 			}
 		}
 	}
@@ -172,7 +164,7 @@ impl Dispatch<wl_callback::WlCallback, ()> for State
 		match event
 		{
 			wl_callback::Event::Done { callback_data: _ } => self.done = true,
-			_ => println!("Unimplemented callback received."),
+			_ => println!("Unimplemented callback received, please open an issue."),
 		}
 	}
 }
@@ -190,7 +182,6 @@ impl Dispatch<wl_output::WlOutput, usize> for State
 	{
 		if let wl_output::Event::Geometry { transform, .. } = event
 		{
-			println!("Transform: {:?}", transform);
 			self.output_infos[*index].transform = transform.into_result().ok();
 		}
 	}
@@ -207,8 +198,6 @@ impl Dispatch<zxdg_output_v1::ZxdgOutputV1, usize> for State
 		_queue_handle: &QueueHandle<Self>,
 	)
 	{
-		println!("Received properties: {:?}", event);
-
 		match event
 		{
 			zxdg_output_v1::Event::LogicalPosition { x, y } =>
@@ -246,33 +235,29 @@ impl Dispatch<zwlr_screencopy_frame_v1::ZwlrScreencopyFrameV1, usize> for State
 				stride,
 			} =>
 			{
-				println!("stride: {}", stride);
 				let raw_fd = memfd::memfd_create(
-					ffi::CStr::from_bytes_with_nul(b"qrode\0").unwrap(),
+					ffi::CStr::from_bytes_with_nul(b"gato\0").unwrap(),
 					memfd::MemFdCreateFlag::MFD_CLOEXEC | memfd::MemFdCreateFlag::MFD_ALLOW_SEALING,
 				)
 				.unwrap();
 
-				// qrode_screencopy_frame.raw_fd = Some(raw_fd);
 				self.output_infos[*index].image_file =
 					Some(unsafe { fs::File::from_raw_fd(raw_fd) });
 				self.output_infos[*index].image_size = Some((width as i32, height as i32));
 
-				println!("258: width: {}, height: {}", width, height);
-				// TODO: handle other pixel formats
 				self.output_infos[*index]
 					.image_file
 					.as_mut()
 					.unwrap()
 					.set_len((width * height * 4) as u64)
-					.expect("Failed to allocate memory for screencopy");
+					.expect("Failed to allocate memory for screencopy.");
 
 				let wl_shm_pool = self
 					.wl_shm
 					.as_ref()
 					.unwrap()
 					.create_pool(raw_fd, (width * height * 4) as i32, queue_handle, ())
-					.unwrap();
+					.expect("Failed to create pool from wl_shm.");
 
 				let wl_buffer = wl_shm_pool
 					.create_buffer(
@@ -284,7 +269,7 @@ impl Dispatch<zwlr_screencopy_frame_v1::ZwlrScreencopyFrameV1, usize> for State
 						queue_handle,
 						(),
 					)
-					.unwrap();
+					.expect("Failed to create buffer from wl_shm_pool.");
 
 				wlr_screencopy_frame.copy(&wl_buffer);
 			}
@@ -296,18 +281,13 @@ impl Dispatch<zwlr_screencopy_frame_v1::ZwlrScreencopyFrameV1, usize> for State
 			{
 				let output_info = &mut self.output_infos[*index];
 
-				// let mut image_file =
-				// unsafe{fs::File::from_raw_fd(qrode_screencopy_frame.raw_fd.unwrap())};
 				let image_file = output_info.image_file.as_mut().unwrap();
-				// image_file.rewind();
 
 				let mut tmp_file =
 					fs::File::create(format!("/tmp/qrode/output{}.ppm", *index)).unwrap();
 
-				// io::copy(image_file, &mut tmp_file);
 				let image_size = output_info.image_size.as_ref().unwrap();
 
-				// TODO: handle alternate buffer formats
 				let mut buffer = vec![0_u8; (image_size.0 * image_size.1 * 4) as usize];
 
 				image_file.read_exact(&mut buffer).unwrap();
@@ -316,7 +296,6 @@ impl Dispatch<zwlr_screencopy_frame_v1::ZwlrScreencopyFrameV1, usize> for State
 
 				for i in (0..(image_size.0 * image_size.1 * 4)).step_by(4)
 				{
-					// xbgr8888le to rgb888be
 					writeln!(
 						tmp_file,
 						"{} {} {}",
@@ -325,51 +304,14 @@ impl Dispatch<zwlr_screencopy_frame_v1::ZwlrScreencopyFrameV1, usize> for State
 						buffer[i as usize + 2]
 					)
 					.unwrap();
-
-					// if i > 6038300 || i < 100
-					// {
-					//     //println!("rgbx BE: {} {} {} {}", buffer[i as usize], buffer[i as usize
-					// + 1], buffer[i as usize + 2], buffer[i as usize + 3]); }
 				}
 
 				tmp_file.flush().expect("Failed to flush.");
 
-				// println!("buffer: {:?}", buffer);
-
-				// self.output_done_events += 1;
-				println!("Ready");
 				output_info.image_ready = true;
 			}
-			zwlr_screencopy_frame_v1::Event::BufferDone =>
-			{
-				// let raw_fd =
-				//     memfd::memfd_create
-				//         (
-				//             ffi::CStr::from_bytes_with_nul(b"qrode\0").unwrap(),
-				//             memfd::MemFdCreateFlag::MFD_CLOEXEC |
-				// memfd::MemFdCreateFlag::MFD_ALLOW_SEALING         ).unwrap();
-
-				// //qrode_screencopy_frame.raw_fd = Some(raw_fd);
-				// self.output_infos[*index].image_file =
-				// Some(unsafe{fs::File::from_raw_fd(raw_fd)}); self.output_infos[*index].
-				// image_size = Some((width as i32, height as i32));
-
-				// // TODO: handle other pixel formats
-				// self.output_infos[*index].image_file.as_mut().unwrap().set_len((width *
-				// height * 4) as u64);
-
-				// let wl_shm_pool = self.wl_shm.as_ref().unwrap().create_pool(raw_fd, (width *
-				// height * 4) as i32, queue_handle, ()).unwrap();
-
-				// let wl_buffer = wl_shm_pool.create_buffer(0, width as i32, height as i32, stride
-				// as i32, wl_shm::Format::Argb8888, queue_handle, ()).unwrap();
-
-				// wlr_screencopy_frame.copy(&wl_buffer);
-			}
 			_ =>
-			{
-				println!("Event: {:?}", event);
-			}
+			{}
 		}
 	}
 }
@@ -385,7 +327,6 @@ impl Dispatch<wl_shm::WlShm, ()> for State
 		_queue_handle: &QueueHandle<Self>,
 	)
 	{
-		// println!("WlShm event: {:?}", event);
 	}
 }
 
@@ -455,7 +396,6 @@ pub fn capture_desktop(position: (i32, i32), size: (i32, i32))
 			.unwrap()
 			.get_xdg_output(&output_info.wl_output, &event_queue.handle(), i)
 			.ok();
-		println!("GET XDG OUTPUT");
 	}
 
 	// run until all information about the outputs has been sent
@@ -486,8 +426,6 @@ pub fn capture_desktop(position: (i32, i32), size: (i32, i32))
 			position.1 - output_info.logical_position.unwrap().1,
 		);
 
-		println!("position: {:?}, size: {:?}", position, size);
-		// TODO: account for logical position and size
 		match output_info.transform.as_ref().unwrap()
 		{
 			wl_output::Transform::Normal =>
@@ -508,6 +446,7 @@ pub fn capture_desktop(position: (i32, i32), size: (i32, i32))
 					)
 					.unwrap();
 			}
+			// TODO: handle other transforms
 			wl_output::Transform::_90 =>
 			{}
 			wl_output::Transform::_180 =>
@@ -519,9 +458,6 @@ pub fn capture_desktop(position: (i32, i32), size: (i32, i32))
 					output_info.logical_size.as_ref().unwrap().0 - size.0 - position.0,
 					output_info.logical_size.as_ref().unwrap().1 - size.1 - position.1,
 				);
-				// let position = (output_info.logical_size.as_ref().unwrap().0 - position.0 -
-				// size.0, output_info.logical_size.as_ref().unwrap().1 - position.1);
-				// let size = (-size.0, -size.1);
 
 				state
 					.wlr_screencopy_manager
@@ -541,7 +477,7 @@ pub fn capture_desktop(position: (i32, i32), size: (i32, i32))
 			}
 			_ =>
 			{
-				println!("Not implemented, please report!");
+				println!("Display transform not implemented, please open an issue.");
 			}
 		}
 	}
@@ -551,8 +487,6 @@ pub fn capture_desktop(position: (i32, i32), size: (i32, i32))
 		.iter()
 		.any(|output_info| !output_info.image_ready)
 	{
-		println!("Before");
 		event_queue.blocking_dispatch(&mut state).unwrap();
-		println!("After");
 	}
 }
