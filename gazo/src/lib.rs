@@ -1,9 +1,6 @@
-use std::{
-	ffi, fs,
-	io::{Read, Write},
-	os::unix::io::FromRawFd,
-};
+use std::{ffi, fs, os::unix::io::FromRawFd};
 
+use memmap2;
 use nix::sys::memfd;
 use wayland_client::{
 	self,
@@ -15,17 +12,22 @@ use wayland_protocols_wlr::screencopy::v1::client::{
 	zwlr_screencopy_frame_v1, zwlr_screencopy_manager_v1,
 };
 
-// use image::
+mod capture;
 mod rectangle;
 
-struct OutputInfo
+// pub use rectangle::Size;
+
+#[derive(Debug)]
+pub(crate) struct OutputInfo
 {
 	wl_output: wl_output::WlOutput,
-	logical_position: Option<(i32, i32)>,
-	logical_size: Option<(i32, i32)>,
+	logical_position: Option<rectangle::Position>,
+	logical_size: Option<rectangle::Size>,
 	transform: Option<wl_output::Transform>,
 	image_file: Option<fs::File>, // file is backed by RAM
-	image_size: Option<(i32, i32)>,
+	image_mmap: Option<memmap2::Mmap>,
+	image_position_absolute: Option<rectangle::Position>, // image position is absolute coordinates
+	image_size: Option<rectangle::Size>,
 	image_ready: bool,
 }
 
@@ -108,6 +110,8 @@ impl Dispatch<wl_registry::WlRegistry, ()> for State
 						logical_size: None,
 						transform: None,
 						image_file: None,
+						image_mmap: None,
+						image_position_absolute: None,
 						image_size: None,
 						image_ready: false,
 					});
@@ -202,11 +206,11 @@ impl Dispatch<zxdg_output_v1::ZxdgOutputV1, usize> for State
 		{
 			zxdg_output_v1::Event::LogicalPosition { x, y } =>
 			{
-				self.output_infos[*index].logical_position = Some((x, y));
+				self.output_infos[*index].logical_position = Some(rectangle::Position { x, y });
 			}
 			zxdg_output_v1::Event::LogicalSize { width, height } =>
 			{
-				self.output_infos[*index].logical_size = Some((width, height));
+				self.output_infos[*index].logical_size = Some(rectangle::Size { width, height });
 			}
 			_ =>
 			{}
@@ -243,7 +247,11 @@ impl Dispatch<zwlr_screencopy_frame_v1::ZwlrScreencopyFrameV1, usize> for State
 
 				self.output_infos[*index].image_file =
 					Some(unsafe { fs::File::from_raw_fd(raw_fd) });
-				self.output_infos[*index].image_size = Some((width as i32, height as i32));
+
+				assert!(
+					self.output_infos[*index].image_size.unwrap().width == width as i32
+						&& self.output_infos[*index].image_size.unwrap().height == height as i32
+				);
 
 				self.output_infos[*index]
 					.image_file
@@ -279,36 +287,12 @@ impl Dispatch<zwlr_screencopy_frame_v1::ZwlrScreencopyFrameV1, usize> for State
 				tv_nsec: _,
 			} =>
 			{
-				let output_info = &mut self.output_infos[*index];
+				self.output_infos[*index].image_mmap = Some(unsafe {
+					memmap2::Mmap::map(self.output_infos[*index].image_file.as_ref().unwrap())
+						.expect("Failed to create memory mapping")
+				});
 
-				let image_file = output_info.image_file.as_mut().unwrap();
-
-				let mut tmp_file =
-					fs::File::create(format!("/tmp/qrode/output{}.ppm", *index)).unwrap();
-
-				let image_size = output_info.image_size.as_ref().unwrap();
-
-				let mut buffer = vec![0_u8; (image_size.0 * image_size.1 * 4) as usize];
-
-				image_file.read_exact(&mut buffer).unwrap();
-
-				writeln!(tmp_file, "P3\n{} {}\n255", image_size.0, image_size.1).unwrap();
-
-				for i in (0..(image_size.0 * image_size.1 * 4)).step_by(4)
-				{
-					writeln!(
-						tmp_file,
-						"{} {} {}",
-						buffer[i as usize],
-						buffer[i as usize + 1],
-						buffer[i as usize + 2]
-					)
-					.unwrap();
-				}
-
-				tmp_file.flush().expect("Failed to flush.");
-
-				output_info.image_ready = true;
+				self.output_infos[*index].image_ready = true;
 			}
 			_ =>
 			{}
@@ -358,7 +342,7 @@ impl Dispatch<wl_buffer::WlBuffer, ()> for State
 	}
 }
 
-pub fn capture_desktop(position: (i32, i32), size: (i32, i32))
+fn connect_and_get_output_info() -> (State, wayland_client::EventQueue<State>)
 {
 	let connection =
 		Connection::connect_to_env().expect("Failed to get connection to wayland server.");
@@ -408,80 +392,92 @@ pub fn capture_desktop(position: (i32, i32), size: (i32, i32))
 		event_queue.blocking_dispatch(&mut state).unwrap();
 	}
 
+	(state, event_queue)
+}
+
+pub fn capture_region(region_position: (i32, i32), region_size: (i32, i32)) -> capture::Capture
+{
+	let region_rectangle = rectangle::Rectangle {
+		position: rectangle::Position::new(region_position),
+		size: rectangle::Size::new(region_size),
+	};
+
+	let (mut state, mut event_queue) = connect_and_get_output_info();
+
 	// request capture of screen
-	for (i, output_info) in state.output_infos.iter().enumerate()
+	for (i, output_info) in state.output_infos.iter_mut().enumerate()
 	{
-		let rectangle::Rectangle { position, size } = match rectangle::Rectangle::new(
+		let rectangle::Rectangle {
+			position: image_position_absolute,
+			size: image_size,
+		} = match rectangle::Rectangle::new(
 			output_info.logical_position.unwrap(),
 			output_info.logical_size.unwrap(),
 		)
-		.get_intersection(rectangle::Rectangle { position, size })
+		.get_intersection(region_rectangle)
 		{
 			Some(rectangle) => rectangle,
 			None => continue,
 		};
 
-		let position = (
-			position.0 - output_info.logical_position.unwrap().0,
-			position.1 - output_info.logical_position.unwrap().1,
-		);
+		// image position is in absolute coordinates
+		output_info.image_position_absolute = Some(image_position_absolute);
+		output_info.image_size = Some(image_size);
+
+		// adjust position to local output coordinates
+		let mut image_position_local =
+			image_position_absolute - output_info.logical_position.unwrap();
 
 		match output_info.transform.as_ref().unwrap()
 		{
 			wl_output::Transform::Normal =>
 			{
-				state
-					.wlr_screencopy_manager
-					.as_ref()
-					.unwrap()
-					.capture_output_region(
-						0,
-						&output_info.wl_output,
-						position.0,
-						position.1,
-						size.0,
-						size.1,
-						&event_queue.handle(),
-						i,
-					)
-					.unwrap();
+				// no adjustment needed
 			}
-			// TODO: handle other transforms
+			// TODO: handle other transforms (check docs for the flipped variants)
 			wl_output::Transform::_90 =>
-			{}
+			{
+				// TODO
+			}
 			wl_output::Transform::_180 =>
-			{}
+			{
+				// TODO
+			}
 			wl_output::Transform::_270 =>
 			{
 				// transforms position so it starts at top left
-				let position = (
-					output_info.logical_size.as_ref().unwrap().0 - size.0 - position.0,
-					output_info.logical_size.as_ref().unwrap().1 - size.1 - position.1,
-				);
-
-				state
-					.wlr_screencopy_manager
-					.as_ref()
-					.unwrap()
-					.capture_output_region(
-						0,
-						&output_info.wl_output,
-						position.0,
-						position.1,
-						size.0,
-						size.1,
-						&event_queue.handle(),
-						i,
-					)
-					.unwrap();
+				// TODO: explain why this works
+				image_position_local = rectangle::Position {
+					x: output_info.logical_size.unwrap().width
+						- image_size.width - image_position_local.x,
+					y: output_info.logical_size.unwrap().height
+						- image_size.height - image_position_local.y,
+				};
 			}
 			_ =>
 			{
 				println!("Display transform not implemented, please open an issue.");
 			}
 		}
+
+		state
+			.wlr_screencopy_manager
+			.as_ref()
+			.unwrap()
+			.capture_output_region(
+				0,
+				&output_info.wl_output,
+				image_position_local.x,
+				image_position_local.y,
+				image_size.width,
+				image_size.height,
+				&event_queue.handle(),
+				i,
+			)
+			.unwrap();
 	}
 
+	// wait for images to be ready
 	while state
 		.output_infos
 		.iter()
@@ -489,4 +485,8 @@ pub fn capture_desktop(position: (i32, i32), size: (i32, i32))
 	{
 		event_queue.blocking_dispatch(&mut state).unwrap();
 	}
+
+	let capture = capture::Capture::new(state.output_infos).expect("There were no output_infos");
+
+	capture
 }

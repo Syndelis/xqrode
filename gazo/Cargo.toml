@@ -12,3 +12,5 @@ wayland-protocols-wlr = {version = "0.1.0-beta.3", features = ["client"]}
 regex = "1.5.6"
 nix = {version = "0.24.1", features = ["fs"]}
 image = "0.24.2"
+thiserror = "1.0.31"
+memmap2 = "0.5.4"

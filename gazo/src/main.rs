@@ -1,8 +1,10 @@
-use std::io;
-
-use regex::Regex;
+use std::{
+	fs,
+	io::{self, Write},
+};
 
 use gazo;
+use regex::Regex;
 
 fn main()
 {
@@ -25,6 +27,24 @@ fn main()
 		captures.get(3).unwrap().as_str().parse::<i32>().unwrap(),
 		captures.get(4).unwrap().as_str().parse::<i32>().unwrap(),
 	);
-	
-	gazo::capture_desktop(position, size);
+
+	let capture = gazo::capture_region(position, size);
+
+	let capture_size = capture.get_pixel_size();
+
+	let mut tmp_file = fs::File::create("/tmp/qrode.ppm").unwrap();
+
+	writeln!(
+		tmp_file,
+		"P3\n{} {}\n255",
+		capture_size.width, capture_size.height
+	)
+	.unwrap();
+
+	for pixel in capture
+	{
+		writeln!(tmp_file, "{} {} {}", pixel[0], pixel[1], pixel[2]).unwrap();
+	}
+
+	tmp_file.flush().expect("Failed to flush.");
 }
