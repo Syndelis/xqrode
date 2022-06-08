@@ -59,9 +59,55 @@ impl Capture
 		})
 	}
 
-	pub fn get_pixel_size(&self) -> rectangle::Size
+	pub fn get_size_pixels(&self) -> rectangle::Size
 	{
 		self.capture_rectangle_absolute.size
+	}
+
+	///
+	pub fn get_pixel(&self, position: (usize, usize)) -> Option<[u8; 4]>
+	{
+		let position_absolute = rectangle::Position::new((
+			self.capture_rectangle_absolute.position.x + position.0 as i32,
+			self.capture_rectangle_absolute.position.y + position.1 as i32,
+		));
+
+		for output_info in &self.output_infos
+		{
+			let rectangle = rectangle::Rectangle {
+				position: output_info.image_position_absolute.unwrap(),
+				size: output_info.image_size.unwrap(),
+			};
+
+			if rectangle.position_falls_within(position_absolute)
+			{
+				let index = ((position_absolute.x
+					- output_info.image_position_absolute.unwrap().x)
+					+ ((position_absolute.y - output_info.image_position_absolute.unwrap().y)
+						* output_info.image_size.unwrap().width))
+					* 4;
+
+				return Some([
+					output_info.image_mmap.as_ref().unwrap()[index as usize], // R
+					output_info.image_mmap.as_ref().unwrap()[(index + 1) as usize], // G
+					output_info.image_mmap.as_ref().unwrap()[(index + 2) as usize], // B
+					255,                                                      // A
+				]);
+			}
+		}
+
+		// outside screencopies, but within capture region
+		// so should be transparent
+		if self
+			.capture_rectangle_absolute
+			.position_falls_within(position_absolute)
+		{
+			Some([0, 0, 0, 0])
+		}
+		else
+		{
+			None
+		}
 	}
 }
 
@@ -121,7 +167,6 @@ impl Iterator for Capture
 		}
 		else
 		{
-			println!("OUTSIDE");
 			None
 		}
 	}

@@ -30,7 +30,7 @@ fn main()
 
 	let capture = gazo::capture_region(position, size);
 
-	let capture_size = capture.get_pixel_size();
+	let capture_size = capture.get_size_pixels();
 
 	let mut tmp_file = fs::File::create("/tmp/qrode.ppm").unwrap();
 
@@ -41,9 +41,13 @@ fn main()
 	)
 	.unwrap();
 
-	for pixel in capture
+	for y in 0..capture_size.height
 	{
-		writeln!(tmp_file, "{} {} {}", pixel[0], pixel[1], pixel[2]).unwrap();
+		for x in 0..capture_size.width
+		{
+			let pixel = capture.get_pixel((x as usize, y as usize)).unwrap();
+			writeln!(tmp_file, "{} {} {}", pixel[0], pixel[1], pixel[2]).unwrap();
+		}
 	}
 
 	tmp_file.flush().expect("Failed to flush.");
