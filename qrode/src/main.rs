@@ -38,7 +38,7 @@ fn main()
 		capture_size.height as usize,
 		move |x, y| {
 			// average the rgb value
-			capture.get_pixel((x, y)).unwrap()[0..3]
+			capture.get_pixel(x, y).unwrap()[0..3]
 				.iter()
 				.cloned()
 				.fold(0, |accumulator, item| accumulator + (item / 3))
