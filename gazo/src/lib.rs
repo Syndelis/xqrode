@@ -1,6 +1,5 @@
 use std::{ffi, fs, os::unix::io::FromRawFd};
 
-use memmap2;
 use nix::sys::memfd;
 use wayland_client::{
 	self,
@@ -15,10 +14,8 @@ use wayland_protocols_wlr::screencopy::v1::client::{
 mod capture;
 mod rectangle;
 
-// pub use rectangle::Size;
-
 #[derive(Debug)]
-pub(crate) struct OutputInfo
+pub struct OutputInfo
 {
 	wl_output: wl_output::WlOutput,
 	logical_position: Option<rectangle::Position>,
@@ -29,6 +26,33 @@ pub(crate) struct OutputInfo
 	image_position_absolute: Option<rectangle::Position>, // image position is absolute coordinates
 	image_size: Option<rectangle::Size>,
 	image_ready: bool,
+}
+
+impl capture::Capture for OutputInfo
+{
+	fn get_position(&self) -> rectangle::Position
+	{
+		self.image_position_absolute.unwrap()
+	}
+
+	fn get_size(&self) -> rectangle::Size
+	{
+		self.image_size.unwrap()
+	}
+
+	fn get_pixel(&self, position: rectangle::Position) -> [u8; 4]
+	{
+		let index = ((position.x - self.get_position().x)
+			+ ((position.y - self.get_position().y) * self.get_size().width))
+			* 4;
+
+		[
+			self.image_mmap.as_ref().unwrap()[index as usize], // R
+			self.image_mmap.as_ref().unwrap()[(index + 1) as usize], // G
+			self.image_mmap.as_ref().unwrap()[(index + 2) as usize], // B
+			self.image_mmap.as_ref().unwrap()[(index + 3) as usize], // A
+		]
+	}
 }
 
 struct State
@@ -395,7 +419,10 @@ fn connect_and_get_output_info() -> (State, wayland_client::EventQueue<State>)
 	(state, event_queue)
 }
 
-pub fn capture_region(region_position: (i32, i32), region_size: (i32, i32)) -> capture::Capture
+pub fn capture_region(
+	region_position: (i32, i32),
+	region_size: (i32, i32),
+) -> capture::FullCapture<OutputInfo>
 {
 	let region_rectangle = rectangle::Rectangle {
 		position: rectangle::Position::new(region_position),
@@ -486,7 +513,5 @@ pub fn capture_region(region_position: (i32, i32), region_size: (i32, i32)) -> c
 		event_queue.blocking_dispatch(&mut state).unwrap();
 	}
 
-	let capture = capture::Capture::new(state.output_infos).expect("There were no output_infos");
-
-	capture
+	capture::FullCapture::new(state.output_infos).expect("There were no output_infos")
 }

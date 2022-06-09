@@ -92,15 +92,8 @@ impl Rectangle
 	// TODO: test this
 	pub fn position_falls_within(&self, position: Position) -> bool
 	{
-		if (position.x >= self.position.x && position.x < self.position.x + self.size.width)
+		(position.x >= self.position.x && position.x < self.position.x + self.size.width)
 			&& (position.y >= self.position.y && position.y < self.position.y + self.size.height)
-		{
-			true
-		}
-		else
-		{
-			false
-		}
 	}
 
 	pub fn get_intersection(self, rectangle: Rectangle) -> Option<Rectangle>

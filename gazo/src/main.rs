@@ -3,7 +3,6 @@ use std::{
 	io::{self, Write},
 };
 
-use gazo;
 use regex::Regex;
 
 fn main()
@@ -32,7 +31,7 @@ fn main()
 
 	let capture_size = capture.get_size_pixels();
 
-	let mut tmp_file = fs::File::create("/tmp/qrode.ppm").unwrap();
+	let mut tmp_file = fs::File::create("/tmp/gazo.ppm").unwrap();
 
 	writeln!(
 		tmp_file,
@@ -45,7 +44,7 @@ fn main()
 	{
 		for x in 0..capture_size.width
 		{
-			let pixel = capture.get_pixel((x as usize, y as usize)).unwrap();
+			let pixel = capture.get_pixel(x as usize, y as usize).unwrap();
 			writeln!(tmp_file, "{} {} {}", pixel[0], pixel[1], pixel[2]).unwrap();
 		}
 	}
