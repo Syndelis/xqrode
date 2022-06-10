@@ -14,8 +14,9 @@ use wayland_protocols_wlr::screencopy::v1::client::{
 mod capture;
 mod rectangle;
 
-#[derive(Debug)]
-pub struct OutputInfo
+pub use capture::FullCapture;
+
+struct OutputInfo
 {
 	wl_output: wl_output::WlOutput,
 	logical_position: Option<rectangle::Position>,
@@ -23,12 +24,12 @@ pub struct OutputInfo
 	transform: Option<wl_output::Transform>,
 	image_file: Option<fs::File>, // file is backed by RAM
 	image_mmap: Option<memmap2::Mmap>,
-	image_position_absolute: Option<rectangle::Position>, // image position is absolute coordinates
+	image_position: Option<rectangle::Position>, // image position is absolute coordinates
 	image_size: Option<rectangle::Size>,
 	image_ready: bool,
 }
 
-impl capture::Capture for OutputInfo
+impl capture::SingleCapture for OutputInfo
 {
 	fn get_position(&self) -> rectangle::Position
 	{
@@ -422,7 +423,7 @@ fn connect_and_get_output_info() -> (State, wayland_client::EventQueue<State>)
 pub fn capture_region(
 	region_position: (i32, i32),
 	region_size: (i32, i32),
-) -> capture::FullCapture<OutputInfo>
+) -> capture::FullCapture<impl capture::SingleCapture>
 {
 	let region_rectangle = rectangle::Rectangle {
 		position: rectangle::Position::new(region_position),

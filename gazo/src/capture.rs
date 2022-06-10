@@ -2,7 +2,7 @@ use std::cmp;
 
 use crate::rectangle;
 
-pub trait Capture
+pub trait SingleCapture
 {
 	fn get_position(&self) -> rectangle::Position;
 
@@ -12,13 +12,13 @@ pub trait Capture
 }
 
 #[derive(Debug)]
-pub struct FullCapture<T: Capture>
+pub struct FullCapture<T: SingleCapture>
 {
 	captures: Vec<T>,
 	capture_rectangle_absolute: rectangle::Rectangle,
 }
 
-impl<T: Capture> FullCapture<T>
+impl<T: SingleCapture> FullCapture<T>
 {
 	pub(crate) fn new(captures: Vec<T>) -> Option<Self>
 	{
