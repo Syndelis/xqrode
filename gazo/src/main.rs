@@ -29,7 +29,7 @@ fn main()
 
 	let capture = gazo::capture_region(position, size);
 
-	let capture_size = capture.get_size_pixels();
+	let capture_size = capture.get_size_in_pixels();
 
 	let mut tmp_file = fs::File::create("/tmp/gazo.ppm").unwrap();
 
@@ -44,7 +44,7 @@ fn main()
 	{
 		for x in 0..capture_size.width
 		{
-			let pixel = capture.get_pixel(x as usize, y as usize).unwrap();
+			let pixel = capture.get_pixel(x as usize, y as usize);
 			writeln!(tmp_file, "{} {} {}", pixel[0], pixel[1], pixel[2]).unwrap();
 		}
 	}

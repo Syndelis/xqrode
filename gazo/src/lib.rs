@@ -15,6 +15,10 @@ mod capture;
 mod rectangle;
 
 pub use capture::FullCapture;
+pub use rectangle::{Position, Size};
+
+// All coordinates in this crate are absolute in the compositor coordinate space
+// unless otherwise specified.
 
 struct OutputInfo
 {
@@ -33,7 +37,7 @@ impl capture::SingleCapture for OutputInfo
 {
 	fn get_position(&self) -> rectangle::Position
 	{
-		self.image_position_absolute.unwrap()
+		self.image_position.unwrap()
 	}
 
 	fn get_size(&self) -> rectangle::Size
@@ -136,7 +140,7 @@ impl Dispatch<wl_registry::WlRegistry, ()> for State
 						transform: None,
 						image_file: None,
 						image_mmap: None,
-						image_position_absolute: None,
+						image_position: None,
 						image_size: None,
 						image_ready: false,
 					});
@@ -436,7 +440,7 @@ pub fn capture_region(
 	for (i, output_info) in state.output_infos.iter_mut().enumerate()
 	{
 		let rectangle::Rectangle {
-			position: image_position_absolute,
+			position: image_position,
 			size: image_size,
 		} = match rectangle::Rectangle::new(
 			output_info.logical_position.unwrap(),
@@ -449,12 +453,11 @@ pub fn capture_region(
 		};
 
 		// image position is in absolute coordinates
-		output_info.image_position_absolute = Some(image_position_absolute);
+		output_info.image_position = Some(image_position);
 		output_info.image_size = Some(image_size);
 
 		// adjust position to local output coordinates
-		let mut image_position_local =
-			image_position_absolute - output_info.logical_position.unwrap();
+		let mut image_position_local = image_position - output_info.logical_position.unwrap();
 
 		match output_info.transform.as_ref().unwrap()
 		{

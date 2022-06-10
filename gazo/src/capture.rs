@@ -18,6 +18,7 @@ pub struct FullCapture<T: SingleCapture>
 	capture_rectangle_absolute: rectangle::Rectangle,
 }
 
+/// This struct represents the entire contents of a capture.
 impl<T: SingleCapture> FullCapture<T>
 {
 	pub(crate) fn new(captures: Vec<T>) -> Option<Self>
@@ -59,13 +60,19 @@ impl<T: SingleCapture> FullCapture<T>
 		})
 	}
 
-	pub fn get_size_pixels(&self) -> rectangle::Size
+	/// Returns the actual size of the capture in pixels. Use this to loop
+	/// through the capture coordinates without going out of bounds.
+	pub fn get_size_in_pixels(&self) -> rectangle::Size
 	{
 		self.capture_rectangle_absolute.size
 	}
 
-	///
-	pub fn get_pixel(&self, x: usize, y: usize) -> Option<[u8; 4]>
+	/// Returns a pixel in the RGBA big endian format. This function will cause
+	/// a panic if the provided coordinate falls outside the capture. The memory
+	/// location must be calulated each call, so when multile accesses are
+	/// needed it is recommended to read the pixels into contiguous memory
+	/// first.
+	pub fn get_pixel(&self, x: usize, y: usize) -> [u8; 4]
 	{
 		let position_absolute = rectangle::Position::new((
 			self.capture_rectangle_absolute.position.x + x as i32,
@@ -81,7 +88,7 @@ impl<T: SingleCapture> FullCapture<T>
 
 			if rectangle.position_falls_within(position_absolute)
 			{
-				return Some(capture.get_pixel(position_absolute));
+				return capture.get_pixel(position_absolute);
 			}
 		}
 
@@ -91,11 +98,11 @@ impl<T: SingleCapture> FullCapture<T>
 			.capture_rectangle_absolute
 			.position_falls_within(position_absolute)
 		{
-			Some([0, 0, 0, 0])
+			[0, 0, 0, 0]
 		}
 		else
 		{
-			None
+			panic!("Coordinate fell outside of capture");
 		}
 	}
 }

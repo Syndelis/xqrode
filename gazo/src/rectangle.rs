@@ -1,6 +1,6 @@
 use std::ops::{Add, Sub};
 
-#[derive(Debug, PartialEq, Copy, Clone)]
+#[derive(Debug, PartialEq, Eq, Copy, Clone)]
 pub struct Position
 {
 	pub x: i32,
@@ -44,7 +44,7 @@ impl Sub for Position
 	}
 }
 
-#[derive(Debug, PartialEq, Copy, Clone)]
+#[derive(Debug, PartialEq, Eq, Copy, Clone)]
 pub struct Size
 {
 	pub width: i32,
@@ -75,6 +75,19 @@ impl Add<Size> for Position
 	}
 }
 
+impl Sub<Size> for Position
+{
+	type Output = Self;
+
+	fn sub(self, rhs: Size) -> Self::Output
+	{
+		Position {
+			x: self.x - rhs.width,
+			y: self.y - rhs.height,
+		}
+	}
+}
+
 #[derive(Debug, PartialEq, Copy, Clone)]
 pub struct Rectangle
 {
@@ -89,7 +102,6 @@ impl Rectangle
 		Rectangle { position, size }
 	}
 
-	// TODO: test this
 	pub fn position_falls_within(&self, position: Position) -> bool
 	{
 		(position.x >= self.position.x && position.x < self.position.x + self.size.width)
@@ -98,25 +110,22 @@ impl Rectangle
 
 	pub fn get_intersection(self, rectangle: Rectangle) -> Option<Rectangle>
 	{
-		if self.size.width <= 0
-			|| self.size.height <= 0
-			|| rectangle.size.width <= 0
-			|| rectangle.size.height <= 0
-		{
-			return None;
-		}
-
-		let mut position: (Option<i32>, Option<i32>) = (None, None);
-		let mut size: (Option<i32>, Option<i32>) = (None, None);
+		let mut intersecting_rectangle = Rectangle {
+			position: Position { x: 0, y: 0 },
+			size: Size {
+				width: 0,
+				height: 0,
+			},
+		};
 
 		if (self.position.x..=self.position.x + self.size.width).contains(&rectangle.position.x)
 		{
-			position.0 = Some(rectangle.position.x);
+			intersecting_rectangle.position.x = rectangle.position.x;
 		}
 		else if (rectangle.position.x..=rectangle.position.x + rectangle.size.width)
 			.contains(&self.position.x)
 		{
-			position.0 = Some(self.position.x);
+			intersecting_rectangle.position.x = self.position.x;
 		}
 		else
 		{
@@ -125,12 +134,12 @@ impl Rectangle
 
 		if (self.position.y..=self.position.y + self.size.height).contains(&rectangle.position.y)
 		{
-			position.1 = Some(rectangle.position.y);
+			intersecting_rectangle.position.y = rectangle.position.y;
 		}
 		else if (rectangle.position.y..=rectangle.position.y + rectangle.size.height)
 			.contains(&self.position.y)
 		{
-			position.1 = Some(self.position.y);
+			intersecting_rectangle.position.y = self.position.y;
 		}
 		else
 		{
@@ -140,12 +149,14 @@ impl Rectangle
 		if (self.position.x..=self.position.x + self.size.width)
 			.contains(&(rectangle.position.x + rectangle.size.width))
 		{
-			size.0 = Some(rectangle.position.x + rectangle.size.width - position.0.unwrap());
+			intersecting_rectangle.size.width =
+				rectangle.position.x + rectangle.size.width - intersecting_rectangle.position.x;
 		}
 		else if (rectangle.position.x..=rectangle.position.x + rectangle.size.width)
 			.contains(&(self.position.x + self.size.width))
 		{
-			size.0 = Some(self.position.x + self.size.width - position.0.unwrap());
+			intersecting_rectangle.size.width =
+				self.position.x + self.size.width - intersecting_rectangle.position.x;
 		}
 		else
 		{
@@ -155,28 +166,21 @@ impl Rectangle
 		if (self.position.y..=self.position.y + self.size.height)
 			.contains(&(rectangle.position.y + rectangle.size.height))
 		{
-			size.1 = Some(rectangle.position.y + rectangle.size.height - position.1.unwrap());
+			intersecting_rectangle.size.height =
+				rectangle.position.y + rectangle.size.height - intersecting_rectangle.position.y;
 		}
 		else if (rectangle.position.y..=rectangle.position.y + rectangle.size.height)
 			.contains(&(self.position.y + self.size.height))
 		{
-			size.1 = Some(self.position.y + self.size.height - position.1.unwrap());
+			intersecting_rectangle.size.height =
+				self.position.y + self.size.height - intersecting_rectangle.position.y;
 		}
 		else
 		{
 			return None;
 		}
 
-		Some(Rectangle {
-			position: Position {
-				x: position.0.unwrap(),
-				y: position.1.unwrap(),
-			},
-			size: Size {
-				width: size.0.unwrap(),
-				height: size.1.unwrap(),
-			},
-		})
+		Some(intersecting_rectangle)
 	}
 }
 
@@ -341,6 +345,50 @@ mod tests
 		for test_case in test_cases
 		{
 			assert_eq!(test_case.0.get_intersection(test_case.1), test_case.2);
+		}
+	}
+
+	#[test]
+	fn test_rectangle_position_falls_within()
+	{
+		let rectangle = Rectangle {
+			position: Position { x: 0, y: 0 },
+			size: Size {
+				width: 500,
+				height: 500,
+			},
+		};
+
+		let test_cases = [
+			// 3x3 grid with edges outside rectangle
+			(Position { x: -50, y: -50 }, false),
+			(Position { x: 250, y: -50 }, false),
+			(Position { x: 550, y: -50 }, false),
+			(Position { x: -50, y: 250 }, false),
+			(Position { x: 250, y: 250 }, true),
+			(Position { x: 550, y: 250 }, false),
+			(Position { x: -50, y: 550 }, false),
+			(Position { x: 250, y: 550 }, false),
+			(Position { x: 550, y: 550 }, false),
+			// test edge cases (literally)
+			(Position { x: 0, y: 0 }, true),
+			(Position { x: 250, y: 0 }, true),
+			(Position { x: 500, y: 0 }, false),
+			(Position { x: 0, y: 250 }, true),
+			(Position { x: 500, y: 250 }, false),
+			(Position { x: 0, y: 500 }, false),
+			(Position { x: 250, y: 500 }, false),
+			(Position { x: 500, y: 500 }, false),
+			// test corners inside rectangle
+			(Position { x: 50, y: 50 }, true),
+			(Position { x: 450, y: 50 }, true),
+			(Position { x: 50, y: 450 }, true),
+			(Position { x: 450, y: 450 }, true),
+		];
+
+		for test_case in test_cases
+		{
+			assert_eq!(rectangle.position_falls_within(test_case.0), test_case.1);
 		}
 	}
 }
