@@ -88,7 +88,33 @@ impl Sub<Size> for Position
 	}
 }
 
-#[derive(Debug, PartialEq, Copy, Clone)]
+impl Add for Size
+{
+	type Output = Self;
+
+	fn add(self, rhs: Size) -> Self::Output
+	{
+		Size {
+			width: self.width + rhs.width,
+			height: self.height + rhs.height,
+		}
+	}
+}
+
+impl Sub for Size
+{
+	type Output = Self;
+
+	fn sub(self, rhs: Size) -> Self::Output
+	{
+		Size {
+			width: self.width - rhs.width,
+			height: self.height - rhs.height,
+		}
+	}
+}
+
+#[derive(Debug, PartialEq, Eq, Copy, Clone)]
 pub struct Rectangle
 {
 	pub position: Position,

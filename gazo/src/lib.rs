@@ -468,7 +468,6 @@ pub fn capture_region(
 			None => continue,
 		};
 
-		// image position is in absolute coordinates
 		output_info.image_position = Some(image_position);
 		output_info.image_size = Some(image_size);
 
@@ -492,14 +491,15 @@ pub fn capture_region(
 			}
 			wl_output::Transform::_270 =>
 			{
-				// transforms position so it starts at top left
-				// TODO: explain why this works
+				// transforms position so it starts at the logical top left
+				// this transform causes (0, 0) to be at the bottom right of the monitor
 				image_position_local = rectangle::Position {
-					x: output_info.logical_size.unwrap().width
-						- image_size.width - image_position_local.x,
-					y: output_info.logical_size.unwrap().height
-						- image_size.height - image_position_local.y,
+					x: -image_position_local.x,
+					y: -image_position_local.y,
 				};
+
+				image_position_local =
+					image_position_local + (output_info.logical_size.unwrap() - image_size);
 			}
 			_ =>
 			{
