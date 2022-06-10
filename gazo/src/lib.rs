@@ -2,9 +2,11 @@ mod capture;
 mod gazo;
 mod rectangle;
 
-pub use capture::FullCapture;
-pub use gazo::capture_region;
-pub use rectangle::{Position, Size};
+pub use crate::{
+	capture::FullCapture,
+	gazo::capture_region,
+	rectangle::{Position, Size},
+};
 
 // All coordinates in this crate are absolute in the compositor coordinate space
 // unless otherwise specified.
