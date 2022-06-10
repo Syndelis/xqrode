@@ -21,11 +21,11 @@ pub struct FullCapture<T: SingleCapture>
 /// This struct represents the entire contents of a capture.
 impl<T: SingleCapture> FullCapture<T>
 {
-	pub(crate) fn new(captures: Vec<T>) -> Option<Self>
+	pub(crate) fn new(captures: Vec<T>) -> Result<Self, crate::Error>
 	{
 		if captures.is_empty()
 		{
-			return None;
+			return Err(crate::Error::NoCaptures);
 		}
 
 		let mut upper_left = captures[0].get_position();
@@ -48,7 +48,7 @@ impl<T: SingleCapture> FullCapture<T>
 			);
 		}
 
-		Some(FullCapture {
+		Ok(FullCapture {
 			captures,
 			capture_rectangle_absolute: rectangle::Rectangle {
 				position: upper_left,

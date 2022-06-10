@@ -27,7 +27,7 @@ fn main()
 		captures.get(4).unwrap().as_str().parse::<i32>().unwrap(),
 	);
 
-	let capture = gazo::capture_region(position, size);
+	let capture = gazo::capture_region(position, size).unwrap();
 
 	let capture_size = capture.get_size_in_pixels();
 

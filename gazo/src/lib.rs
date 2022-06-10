@@ -1,6 +1,7 @@
-use std::{ffi, fs, os::unix::io::FromRawFd};
+use std::{error, ffi, fs, os::unix::io::FromRawFd};
 
 use nix::sys::memfd;
+use thiserror;
 use wayland_client::{
 	self,
 	protocol::{wl_buffer, wl_callback, wl_output, wl_registry, wl_shm, wl_shm_pool},
@@ -17,8 +18,24 @@ mod rectangle;
 pub use capture::FullCapture;
 pub use rectangle::{Position, Size};
 
+// TODO: look into delegate dispatch to avoid storing OutputInfos as a Vec in
+// State and having to pass an index to access them when needed.
+
 // All coordinates in this crate are absolute in the compositor coordinate space
 // unless otherwise specified.
+
+#[derive(thiserror::Error, Debug)]
+pub enum Error
+{
+	#[error("no captures when trying to construct the full capture")]
+	NoCaptures,
+	#[error("failed to connect to the wayland server")]
+	Connect(#[from] wayland_client::ConnectError),
+	#[error("failed to dispatch event from wayland server")]
+	Dispatch(#[from] wayland_client::DispatchError),
+	#[error("{0}")]
+	Unimplemented(String),
+}
 
 struct OutputInfo
 {
@@ -163,7 +180,7 @@ impl Dispatch<zwlr_screencopy_manager_v1::ZwlrScreencopyManagerV1, ()> for State
 		_queue_handle: &QueueHandle<Self>,
 	)
 	{
-		// only here to satusfy a trait bound
+		// only here to satisfy a trait bound
 	}
 }
 
@@ -371,19 +388,17 @@ impl Dispatch<wl_buffer::WlBuffer, ()> for State
 	}
 }
 
-fn connect_and_get_output_info() -> (State, wayland_client::EventQueue<State>)
+fn connect_and_get_output_info() -> Result<(State, wayland_client::EventQueue<State>), Error>
 {
-	let connection =
-		Connection::connect_to_env().expect("Failed to get connection to wayland server.");
+	let connection = Connection::connect_to_env()?;
 
 	let mut event_queue = connection.new_event_queue();
 
 	let wl_display = connection.display();
 
-	wl_display
-		.get_registry(&event_queue.handle(), ())
-		.expect("Failed to create wayland registry object.");
+	wl_display.get_registry(&event_queue.handle(), ()).unwrap();
 
+	// TODO: try without this line, may be unecessary
 	wl_display.sync(&event_queue.handle(), ()).unwrap();
 
 	let mut state = State {
@@ -397,7 +412,7 @@ fn connect_and_get_output_info() -> (State, wayland_client::EventQueue<State>)
 	// run until initial done event and done event has been sent for all wl_outputs
 	while !state.done
 	{
-		event_queue.blocking_dispatch(&mut state).unwrap();
+		event_queue.blocking_dispatch(&mut state)?;
 	}
 
 	// get xdg output for logical position and size
@@ -408,7 +423,7 @@ fn connect_and_get_output_info() -> (State, wayland_client::EventQueue<State>)
 			.as_ref()
 			.unwrap()
 			.get_xdg_output(&output_info.wl_output, &event_queue.handle(), i)
-			.ok();
+			.unwrap();
 	}
 
 	// run until all information about the outputs has been sent
@@ -418,27 +433,28 @@ fn connect_and_get_output_info() -> (State, wayland_client::EventQueue<State>)
 			|| output_info.transform.is_none()
 	})
 	{
-		event_queue.blocking_dispatch(&mut state).unwrap();
+		event_queue.blocking_dispatch(&mut state)?;
 	}
 
-	(state, event_queue)
+	Ok((state, event_queue))
 }
 
 pub fn capture_region(
 	region_position: (i32, i32),
 	region_size: (i32, i32),
-) -> capture::FullCapture<impl capture::SingleCapture>
+) -> Result<capture::FullCapture<impl capture::SingleCapture>, impl error::Error>
 {
 	let region_rectangle = rectangle::Rectangle {
 		position: rectangle::Position::new(region_position),
 		size: rectangle::Size::new(region_size),
 	};
 
-	let (mut state, mut event_queue) = connect_and_get_output_info();
+	let (mut state, mut event_queue) = connect_and_get_output_info()?;
 
 	// request capture of screen
 	for (i, output_info) in state.output_infos.iter_mut().enumerate()
 	{
+		// determine the region of the output that is selected
 		let rectangle::Rectangle {
 			position: image_position,
 			size: image_size,
@@ -487,7 +503,10 @@ pub fn capture_region(
 			}
 			_ =>
 			{
-				println!("Display transform not implemented, please open an issue.");
+				return Err(Error::Unimplemented(format!(
+					"Output transform not implemented: {:?}",
+					output_info.transform.as_ref().unwrap()
+				)))
 			}
 		}
 
@@ -514,8 +533,8 @@ pub fn capture_region(
 		.iter()
 		.any(|output_info| !output_info.image_ready)
 	{
-		event_queue.blocking_dispatch(&mut state).unwrap();
+		event_queue.blocking_dispatch(&mut state)?;
 	}
 
-	capture::FullCapture::new(state.output_infos).expect("There were no output_infos")
+	capture::FullCapture::new(state.output_infos)
 }
