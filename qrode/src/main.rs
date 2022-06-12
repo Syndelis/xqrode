@@ -1,11 +1,6 @@
 use std::io::{self, Write};
 
-use gazo;
-use open;
 use regex::Regex;
-use rqrr;
-use tempfile;
-use url;
 
 fn main()
 {
@@ -29,16 +24,16 @@ fn main()
 		captures.get(4).unwrap().as_str().parse::<i32>().unwrap(),
 	);
 
-	let capture = gazo::capture_region(position, size);
+	let capture = gazo::capture_region(position, size).unwrap();
 
-	let capture_size = capture.get_size_pixels();
+	let capture_size = capture.get_size_in_pixels();
 
 	let mut prepared_image = rqrr::PreparedImage::prepare_from_greyscale(
 		capture_size.width as usize,
 		capture_size.height as usize,
 		move |x, y| {
 			// average the rgb value
-			capture.get_pixel(x, y).unwrap()[0..3]
+			capture.get_pixel(x, y)[0..3]
 				.iter()
 				.cloned()
 				.fold(0, |accumulator, item| accumulator + (item / 3))
@@ -47,11 +42,11 @@ fn main()
 
 	let grids = prepared_image.detect_grids();
 
-	if grids.len() < 1
+	if grids.is_empty()
 	{
 		println!("No QR codes detected");
 
-		return ();
+		return;
 	}
 
 	for grid in grids
