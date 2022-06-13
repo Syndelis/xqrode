@@ -11,13 +11,16 @@ use wayland_protocols_wlr::screencopy::v1::client::{
 	zwlr_screencopy_frame_v1, zwlr_screencopy_manager_v1,
 };
 
-use crate::{capture, rectangle};
+use crate::{
+	capture::{self, SingleCapture},
+	rectangle,
+};
 
 // TODO: look into delegate dispatch to avoid storing OutputInfos as a Vec in
 // State and having to pass an index to access them when needed.
 
-// All coordinates in this crate are absolute in the compositor coordinate space
-// unless otherwise specified.
+// all coordinates in this crate are absolute in the compositor coordinate space
+// unless otherwise specified as local
 
 struct OutputInfo
 {
@@ -27,7 +30,7 @@ struct OutputInfo
 	transform: Option<wl_output::Transform>,
 	image_file: Option<fs::File>, // file is backed by RAM
 	image_mmap: Option<memmap2::Mmap>,
-	image_position: Option<rectangle::Position>, // image position is absolute coordinates
+	image_position: Option<rectangle::Position>,
 	image_size: Option<rectangle::Size>,
 	image_ready: bool,
 }
@@ -46,9 +49,23 @@ impl capture::SingleCapture for OutputInfo
 
 	fn get_pixel(&self, position: rectangle::Position) -> [u8; 4]
 	{
-		let index = ((position.x - self.get_position().x)
-			+ ((position.y - self.get_position().y) * self.get_size().width))
-			* 4;
+		// TODO: implement other transforms
+		let index = match self.transform.as_ref().unwrap()
+		{
+			wl_output::Transform::Normal =>
+			{
+				((position.x - self.get_position().x)
+					+ ((position.y - self.get_position().y) * self.get_size().width))
+					* 4
+			}
+			wl_output::Transform::_270 =>
+			{
+				(((position.x - self.get_position().x) * self.get_size().height)
+					+ (self.get_size().height - (position.y - self.get_position().y) - 1))
+					* 4
+			}
+			_ => panic!("AHHHH"),
+		};
 
 		[
 			self.image_mmap.as_ref().unwrap()[index as usize], // R
@@ -276,10 +293,21 @@ impl Dispatch<zwlr_screencopy_frame_v1::ZwlrScreencopyFrameV1, usize> for State
 				self.output_infos[*index].image_file =
 					Some(unsafe { fs::File::from_raw_fd(raw_fd) });
 
-				assert!(
-					self.output_infos[*index].image_size.unwrap().width == width as i32
-						&& self.output_infos[*index].image_size.unwrap().height == height as i32
+				println!(
+					"image_size.width: {}, width: {}",
+					self.output_infos[*index].image_size.unwrap().width,
+					width as i32
 				);
+
+				println!(
+					"image_size.height: {}, height: {}",
+					self.output_infos[*index].image_size.unwrap().height,
+					height as i32
+				);
+				// debug_assert!(
+				// 	self.output_infos[*index].image_size.unwrap().width == width as i32
+				// 		&& self.output_infos[*index].image_size.unwrap().height == height as i32
+				// );
 
 				self.output_infos[*index]
 					.image_file
@@ -433,26 +461,30 @@ pub fn capture_region(
 
 	let (mut state, mut event_queue) = connect_and_get_output_info()?;
 
-	// request capture of screen
-	for (i, output_info) in state.output_infos.iter_mut().enumerate()
-	{
+	state.output_infos.retain_mut(|output_info| {
 		// determine the region of the output that is selected
-		let rectangle::Rectangle {
-			position: image_position,
-			size: image_size,
-		} = match rectangle::Rectangle::new(
+		match rectangle::Rectangle::new(
 			output_info.logical_position.unwrap(),
 			output_info.logical_size.unwrap(),
 		)
 		.get_intersection(region_rectangle)
 		{
-			Some(rectangle) => rectangle,
-			None => continue,
-		};
+			Some(rectangle) =>
+			{
+				output_info.image_position = Some(rectangle.position);
+				output_info.image_size = Some(rectangle.size);
 
-		output_info.image_position = Some(image_position);
-		output_info.image_size = Some(image_size);
+				true
+			}
+			None => false,
+		}
+	});
 
+	// request capture of screen
+	for (i, output_info) in state.output_infos.iter_mut().enumerate()
+	{
+		let image_position = output_info.image_position.unwrap();
+		let image_size = output_info.image_size.unwrap();
 		// adjust position to local output coordinates
 		let mut image_position_local = image_position - output_info.logical_position.unwrap();
 
