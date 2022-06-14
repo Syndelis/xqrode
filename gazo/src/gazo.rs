@@ -11,10 +11,7 @@ use wayland_protocols_wlr::screencopy::v1::client::{
 	zwlr_screencopy_frame_v1, zwlr_screencopy_manager_v1,
 };
 
-use crate::{
-	capture::{self, SingleCapture},
-	rectangle,
-};
+use crate::{capture, rectangle};
 
 // TODO: look into delegate dispatch to avoid storing OutputInfos as a Vec in
 // State and having to pass an index to access them when needed.
@@ -179,7 +176,6 @@ impl Dispatch<zwlr_screencopy_manager_v1::ZwlrScreencopyManagerV1, ()> for State
 		_queue_handle: &QueueHandle<Self>,
 	)
 	{
-		// only here to satisfy a trait bound
 	}
 }
 
@@ -194,7 +190,6 @@ impl Dispatch<zxdg_output_manager_v1::ZxdgOutputManagerV1, ()> for State
 		_queue_handle: &QueueHandle<Self>,
 	)
 	{
-		// only here to satusfy a trait bound
 	}
 }
 
@@ -292,22 +287,6 @@ impl Dispatch<zwlr_screencopy_frame_v1::ZwlrScreencopyFrameV1, usize> for State
 
 				self.output_infos[*index].image_file =
 					Some(unsafe { fs::File::from_raw_fd(raw_fd) });
-
-				println!(
-					"image_size.width: {}, width: {}",
-					self.output_infos[*index].image_size.unwrap().width,
-					width as i32
-				);
-
-				println!(
-					"image_size.height: {}, height: {}",
-					self.output_infos[*index].image_size.unwrap().height,
-					height as i32
-				);
-				// debug_assert!(
-				// 	self.output_infos[*index].image_size.unwrap().width == width as i32
-				// 		&& self.output_infos[*index].image_size.unwrap().height == height as i32
-				// );
 
 				self.output_infos[*index]
 					.image_file
@@ -485,6 +464,7 @@ pub fn capture_region(
 	{
 		let image_position = output_info.image_position.unwrap();
 		let image_size = output_info.image_size.unwrap();
+
 		// adjust position to local output coordinates
 		let mut image_position_local = image_position - output_info.logical_position.unwrap();
 
@@ -510,20 +490,18 @@ pub fn capture_region(
 				image_position_local = rectangle::Position {
 					x: -image_position_local.x,
 					y: -image_position_local.y,
-				};
-
-				image_position_local =
-					image_position_local + (output_info.logical_size.unwrap() - image_size);
+				} + (output_info.logical_size.unwrap() - image_size);
 			}
 			_ =>
 			{
 				return Err(crate::Error::Unimplemented(format!(
 					"Output transform not implemented: {:?}",
 					output_info.transform.as_ref().unwrap()
-				)))
+				)));
 			}
 		}
 
+		// TODO: do not unwrap
 		state
 			.wlr_screencopy_manager
 			.as_ref()
@@ -538,6 +516,34 @@ pub fn capture_region(
 				&event_queue.handle(),
 				i,
 			)
+			.unwrap();
+	}
+
+	// wait for images to be ready
+	while state
+		.output_infos
+		.iter()
+		.any(|output_info| !output_info.image_ready)
+	{
+		event_queue.blocking_dispatch(&mut state)?;
+	}
+
+	capture::FullCapture::new(state.output_infos)
+}
+
+pub fn capture_all_outputs(
+) -> Result<capture::FullCapture<impl capture::SingleCapture>, crate::Error>
+{
+	let (mut state, mut event_queue) = connect_and_get_output_info()?;
+
+	for (i, output_info) in state.output_infos.iter().enumerate()
+	{
+		// TODO: do not unwrap
+		state
+			.wlr_screencopy_manager
+			.as_ref()
+			.unwrap()
+			.capture_output(0, &output_info.wl_output, &event_queue.handle(), i)
 			.unwrap();
 	}
 
