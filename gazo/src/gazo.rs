@@ -431,6 +431,7 @@ fn connect_and_get_output_info() -> Result<(State, wayland_client::EventQueue<St
 pub fn capture_region(
 	region_position: (i32, i32),
 	region_size: (i32, i32),
+	include_cursor: bool,
 ) -> Result<capture::FullCapture<impl capture::SingleCapture>, crate::Error>
 {
 	let region_rectangle = rectangle::Rectangle {
@@ -507,7 +508,7 @@ pub fn capture_region(
 			.as_ref()
 			.unwrap()
 			.capture_output_region(
-				0,
+				include_cursor as i32,
 				&output_info.wl_output,
 				image_position_local.x,
 				image_position_local.y,
@@ -532,6 +533,7 @@ pub fn capture_region(
 }
 
 pub fn capture_all_outputs(
+	include_cursor: bool,
 ) -> Result<capture::FullCapture<impl capture::SingleCapture>, crate::Error>
 {
 	let (mut state, mut event_queue) = connect_and_get_output_info()?;
@@ -543,7 +545,12 @@ pub fn capture_all_outputs(
 			.wlr_screencopy_manager
 			.as_ref()
 			.unwrap()
-			.capture_output(0, &output_info.wl_output, &event_queue.handle(), i)
+			.capture_output(
+				include_cursor as i32,
+				&output_info.wl_output,
+				&event_queue.handle(),
+				i,
+			)
 			.unwrap();
 	}
 
