@@ -1,6 +1,7 @@
-use std::path::PathBuf;
+use std::{fs, path::PathBuf, time};
 
 use clap::{ArgEnum, Parser};
+use image::ImageEncoder;
 use regex::Regex;
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ArgEnum)]
@@ -10,14 +11,25 @@ enum ImageType
 	Jpeg,
 }
 
-impl From<ImageType> for image::ImageFormat
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ArgEnum)]
+enum Level
 {
-	fn from(item: ImageType) -> Self
+	Fast,
+	Best,
+	Huffman,
+	Rle,
+}
+
+impl From<Level> for image::codecs::png::CompressionType
+{
+	fn from(item: Level) -> Self
 	{
 		match item
 		{
-			ImageType::Png => Self::Png,
-			ImageType::Jpeg => Self::Jpeg,
+			Level::Fast => Self::Fast,
+			Level::Best => Self::Best,
+			Level::Huffman => Self::Huffman,
+			Level::Rle => Self::Rle,
 		}
 	}
 }
@@ -44,19 +56,27 @@ struct Cli
 		short('t'),
 		arg_enum,
 		value_parser,
-		help("Set the output filetype. Defaults to png."),
+		help("Set the output filetype."),
 		default_value("png")
 	)]
 	image_type: ImageType,
 	#[clap(value_parser)]
 	output_file: PathBuf,
+	#[clap(
+		short('l'),
+		value_parser,
+		help("Set the PNG filetype compression level."),
+		default_value("fast")
+	)]
+	level: Level,
 }
 
 fn main()
 {
+	let time = time::Instant::now();
 	let cli = Cli::parse();
 
-	if cli.geometry.is_some()
+	let capture = if cli.geometry.is_some()
 	{
 		// TODO parse geometry using clap
 		let re = Regex::new(r"(-?\d+),(-?\d+) (\d+)x(\d+)").unwrap();
@@ -74,35 +94,69 @@ fn main()
 			captures.get(4).unwrap().as_str().parse::<i32>().unwrap(),
 		);
 
-		let capture = gazo::capture_region(position, size, cli.cursor).unwrap();
-
-		let capture_size = capture.get_size_in_pixels();
-
-		let mut image =
-			image::RgbaImage::new(capture_size.width as u32, capture_size.height as u32);
-
-		for x in 0..capture_size.width
-		{
-			for y in 0..capture_size.height
-			{
-				image.put_pixel(
-					x as u32,
-					y as u32,
-					image::Rgba(capture.get_pixel(x as usize, y as usize)),
-				);
-			}
-		}
-
-		image
-			.save_with_format(cli.output_file, cli.image_type.into())
-			.expect("Error saving image.");
+		gazo::capture_region(position, size, cli.cursor).unwrap()
 	}
 	else if cli.output.is_some()
 	{
-		//
+		// TODO
+		panic!("UNIMPLEMENTED");
 	}
 	else
 	{
-		// TODO
+		gazo::capture_all_outputs(cli.cursor).unwrap()
+	};
+
+	println!("Time to get capture: {:?}", time.elapsed());
+
+	let capture_size = capture.get_size_in_pixels();
+
+	let mut image_buffer: Vec<u8> =
+		Vec::with_capacity((capture_size.width * capture_size.height * 4) as usize);
+
+	for y in 0..capture_size.height
+	{
+		for x in 0..capture_size.width
+		{
+			for channel in capture.get_pixel(x as usize, y as usize)
+			{
+				image_buffer.push(channel);
+			}
+		}
 	}
+
+	println!("Time to read capture into buffer: {:?}", time.elapsed());
+
+	let file = fs::File::create(cli.output_file).unwrap();
+
+	match cli.image_type
+	{
+		ImageType::Png =>
+		{
+			image::codecs::png::PngEncoder::new_with_quality(
+				file,
+				cli.level.into(),
+				image::codecs::png::FilterType::Adaptive,
+			)
+			.write_image(
+				&image_buffer,
+				capture_size.width as u32,
+				capture_size.height as u32,
+				image::ColorType::Rgba8,
+			)
+			.unwrap();
+		}
+		ImageType::Jpeg =>
+		{
+			image::codecs::jpeg::JpegEncoder::new(file)
+				.write_image(
+					&image_buffer,
+					capture_size.width as u32,
+					capture_size.height as u32,
+					image::ColorType::Rgba8,
+				)
+				.unwrap();
+		}
+	}
+
+	println!("Time to encode and write: {:?}", time.elapsed());
 }

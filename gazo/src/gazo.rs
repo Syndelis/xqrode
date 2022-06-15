@@ -428,11 +428,13 @@ fn connect_and_get_output_info() -> Result<(State, wayland_client::EventQueue<St
 	Ok((state, event_queue))
 }
 
+type CaptureReturn = Result<capture::FullCapture<impl capture::SingleCapture>, crate::Error>;
+
 pub fn capture_region(
 	region_position: (i32, i32),
 	region_size: (i32, i32),
 	include_cursor: bool,
-) -> Result<capture::FullCapture<impl capture::SingleCapture>, crate::Error>
+) -> CaptureReturn
 {
 	let region_rectangle = rectangle::Rectangle {
 		position: rectangle::Position::new(region_position),
@@ -532,14 +534,15 @@ pub fn capture_region(
 	capture::FullCapture::new(state.output_infos)
 }
 
-pub fn capture_all_outputs(
-	include_cursor: bool,
-) -> Result<capture::FullCapture<impl capture::SingleCapture>, crate::Error>
+pub fn capture_all_outputs(include_cursor: bool) -> CaptureReturn
 {
 	let (mut state, mut event_queue) = connect_and_get_output_info()?;
 
-	for (i, output_info) in state.output_infos.iter().enumerate()
+	for (i, output_info) in state.output_infos.iter_mut().enumerate()
 	{
+		output_info.image_position = output_info.logical_position;
+		output_info.image_size = output_info.logical_size;
+
 		// TODO: do not unwrap
 		state
 			.wlr_screencopy_manager
