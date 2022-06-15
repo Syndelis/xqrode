@@ -15,7 +15,7 @@ pub trait SingleCapture
 pub struct FullCapture<T: SingleCapture>
 {
 	captures: Vec<T>,
-	capture_rectangle_absolute: rectangle::Rectangle,
+	capture_rectangle: rectangle::Rectangle,
 }
 
 /// This struct represents the entire contents of a capture.
@@ -50,7 +50,7 @@ impl<T: SingleCapture> FullCapture<T>
 
 		Ok(FullCapture {
 			captures,
-			capture_rectangle_absolute: rectangle::Rectangle {
+			capture_rectangle: rectangle::Rectangle {
 				position: upper_left,
 				size: rectangle::Size {
 					width: bottom_right.x - upper_left.x,
@@ -64,7 +64,7 @@ impl<T: SingleCapture> FullCapture<T>
 	/// through the capture coordinates without going out of bounds.
 	pub fn get_size_in_pixels(&self) -> rectangle::Size
 	{
-		self.capture_rectangle_absolute.size
+		self.capture_rectangle.size
 	}
 
 	/// Returns a pixel in the RGBA big endian format. This function will cause
@@ -75,8 +75,8 @@ impl<T: SingleCapture> FullCapture<T>
 	pub fn get_pixel(&self, x: usize, y: usize) -> [u8; 4]
 	{
 		let position_absolute = rectangle::Position::new((
-			self.capture_rectangle_absolute.position.x + x as i32,
-			self.capture_rectangle_absolute.position.y + y as i32,
+			self.capture_rectangle.position.x + x as i32,
+			self.capture_rectangle.position.y + y as i32,
 		));
 
 		for capture in &self.captures
@@ -95,7 +95,7 @@ impl<T: SingleCapture> FullCapture<T>
 		// outside screencopies, but within capture region
 		// so should be transparent
 		if self
-			.capture_rectangle_absolute
+			.capture_rectangle
 			.position_falls_within(position_absolute)
 		{
 			[0, 0, 0, 0]
