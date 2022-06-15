@@ -51,6 +51,17 @@ pub struct Size
 	pub height: i32,
 }
 
+impl From<(i32, i32)> for Size
+{
+	fn from(item: (i32, i32)) -> Self
+	{
+		Self {
+			width: item.0,
+			height: item.1,
+		}
+	}
+}
+
 impl Size
 {
 	pub fn new(size: (i32, i32)) -> Self
