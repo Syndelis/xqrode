@@ -73,10 +73,9 @@ struct Cli
 
 fn main()
 {
-	let time = time::Instant::now();
 	let cli = Cli::parse();
 
-	let capture = if cli.geometry.is_some()
+	let (width, height, image_buffer) = if cli.geometry.is_some()
 	{
 		// TODO parse geometry using clap
 		let re = Regex::new(r"(-?\d+),(-?\d+) (\d+)x(\d+)").unwrap();
@@ -106,26 +105,6 @@ fn main()
 		gazo::capture_all_outputs(cli.cursor).unwrap()
 	};
 
-	println!("Time to get capture: {:?}", time.elapsed());
-
-	let capture_size = capture.get_size_in_pixels();
-
-	let mut image_buffer: Vec<u8> =
-		Vec::with_capacity((capture_size.width * capture_size.height * 4) as usize);
-
-	for y in 0..capture_size.height
-	{
-		for x in 0..capture_size.width
-		{
-			for channel in capture.get_pixel(x as usize, y as usize)
-			{
-				image_buffer.push(channel);
-			}
-		}
-	}
-
-	println!("Time to read capture into buffer: {:?}", time.elapsed());
-
 	let file = fs::File::create(cli.output_file).unwrap();
 
 	match cli.image_type
@@ -139,8 +118,8 @@ fn main()
 			)
 			.write_image(
 				&image_buffer,
-				capture_size.width as u32,
-				capture_size.height as u32,
+				width as u32,
+				height as u32,
 				image::ColorType::Rgba8,
 			)
 			.unwrap();
@@ -150,13 +129,11 @@ fn main()
 			image::codecs::jpeg::JpegEncoder::new(file)
 				.write_image(
 					&image_buffer,
-					capture_size.width as u32,
-					capture_size.height as u32,
+					width as u32,
+					height as u32,
 					image::ColorType::Rgba8,
 				)
 				.unwrap();
 		}
 	}
-
-	println!("Time to encode and write: {:?}", time.elapsed());
 }

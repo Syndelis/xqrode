@@ -1,11 +1,9 @@
 #![feature(type_alias_impl_trait)]
 
-mod capture;
 mod gazo;
 mod rectangle;
 
 pub use crate::{
-	capture::FullCapture,
 	gazo::{capture_all_outputs, capture_region},
 	rectangle::{Position, Size},
 };

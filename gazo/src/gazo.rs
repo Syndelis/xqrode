@@ -1,4 +1,4 @@
-use std::{ffi, fs, os::unix::io::FromRawFd};
+use std::{cmp, ffi, fs, os::unix::io::FromRawFd};
 
 use nix::sys::memfd;
 use wayland_client::{
@@ -11,7 +11,7 @@ use wayland_protocols_wlr::screencopy::v1::client::{
 	zwlr_screencopy_frame_v1, zwlr_screencopy_manager_v1,
 };
 
-use crate::{capture, rectangle};
+use crate::rectangle;
 
 // TODO: look into delegate dispatch to avoid storing OutputInfos as a Vec in
 // State and having to pass an index to access them when needed.
@@ -32,18 +32,8 @@ struct OutputInfo
 	image_ready: bool,
 }
 
-impl capture::SingleCapture for OutputInfo
+impl OutputInfo
 {
-	fn get_position(&self) -> rectangle::Position
-	{
-		self.image_position.unwrap()
-	}
-
-	fn get_size(&self) -> rectangle::Size
-	{
-		self.image_size.unwrap()
-	}
-
 	fn get_pixel(&self, position: rectangle::Position) -> [u8; 4]
 	{
 		// TODO: implement other transforms
@@ -51,15 +41,17 @@ impl capture::SingleCapture for OutputInfo
 		{
 			wl_output::Transform::Normal =>
 			{
-				((position.x - self.get_position().x)
-					+ ((position.y - self.get_position().y) * self.get_size().width))
+				((position.x - self.image_position.unwrap().x)
+					+ ((position.y - self.image_position.unwrap().y)
+						* self.image_size.unwrap().width))
 					* 4
 			}
 			wl_output::Transform::_270 =>
 			{
-				(((position.x - self.get_position().x) * self.get_size().height)
-					+ (self.get_size().height - (position.y - self.get_position().y) - 1))
-					* 4
+				(((position.x - self.image_position.unwrap().x) * self.image_size.unwrap().height)
+					+ (self.image_size.unwrap().height
+						- (position.y - self.image_position.unwrap().y)
+						- 1)) * 4
 			}
 			_ => panic!("AHHHH"),
 		};
@@ -428,7 +420,7 @@ fn connect_and_get_output_info() -> Result<(State, wayland_client::EventQueue<St
 	Ok((state, event_queue))
 }
 
-type CaptureReturn = Result<capture::FullCapture<impl capture::SingleCapture>, crate::Error>;
+type CaptureReturn = Result<(u32, u32, Vec<u8>), crate::Error>;
 
 pub fn capture_region(
 	region_position: (i32, i32),
@@ -531,7 +523,7 @@ pub fn capture_region(
 		event_queue.blocking_dispatch(&mut state)?;
 	}
 
-	capture::FullCapture::new(state.output_infos)
+	captures_to_buffer(state.output_infos)
 }
 
 pub fn capture_all_outputs(include_cursor: bool) -> CaptureReturn
@@ -566,5 +558,72 @@ pub fn capture_all_outputs(include_cursor: bool) -> CaptureReturn
 		event_queue.blocking_dispatch(&mut state)?;
 	}
 
-	capture::FullCapture::new(state.output_infos)
+	captures_to_buffer(state.output_infos)
+}
+
+fn captures_to_buffer(captures: Vec<OutputInfo>) -> CaptureReturn
+{
+	if captures.is_empty()
+	{
+		return Err(crate::Error::NoCaptures);
+	}
+
+	let mut upper_left = captures[0].image_position.unwrap();
+	let mut bottom_right = upper_left + captures[0].image_size.unwrap();
+
+	for capture in &captures[1..]
+	{
+		upper_left.x = cmp::min(capture.image_position.unwrap().x, upper_left.x);
+
+		upper_left.y = cmp::min(capture.image_position.unwrap().y, upper_left.y);
+
+		bottom_right.x = cmp::max(
+			capture.image_position.unwrap().x + capture.image_size.unwrap().width,
+			bottom_right.x,
+		);
+
+		bottom_right.y = cmp::max(
+			capture.image_position.unwrap().y + capture.image_size.unwrap().height,
+			bottom_right.y,
+		);
+	}
+
+	let size = rectangle::Size {
+		width: bottom_right.x - upper_left.x,
+		height: bottom_right.y - upper_left.y,
+	};
+
+	let mut buffer: Vec<u8> = vec![0; size.width as usize * size.height as usize * 4];
+
+	for capture in &captures
+	{
+		let position_offset = capture.image_position.unwrap() - upper_left;
+
+		for y in 0..capture.image_size.unwrap().height
+		{
+			for x in 0..capture.image_size.unwrap().width
+			{
+				// TODO add offset to x and y from for loops and use to calculate buff index
+				// convert to absolute coordinates
+				let position = rectangle::Position {
+					x: x + capture.image_position.unwrap().x,
+					y: y + capture.image_position.unwrap().y,
+				};
+
+				// println!("capture position: {:?}", capture.image_position.unwrap());
+
+				let pixel = capture.get_pixel(position);
+
+				let index =
+					((position_offset.y + y) * (size.width * 4)) + ((position_offset.x + x) * 4);
+
+				buffer[index as usize] = pixel[0];
+				buffer[(index as usize) + 1] = pixel[1];
+				buffer[(index as usize) + 2] = pixel[2];
+				buffer[(index as usize) + 3] = pixel[3];
+			}
+		}
+	}
+
+	Ok((size.width as u32, size.height as u32, buffer))
 }
