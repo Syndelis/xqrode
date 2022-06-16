@@ -3,5 +3,9 @@ image: "rust:latest"
 # Use cargo to test the project
 test:cargo:
   script:
-      - rustc --version && cargo --version  # Print version info for debugging
+      # switch to nightly
+      - rustup update nightly && rustup default nightly
+      # print version info
+      - rustc --version && cargo --version
+      # run tests
       - cargo test --workspace --verbose
