@@ -139,12 +139,6 @@ impl Rectangle
 		Rectangle { position, size }
 	}
 
-	pub fn position_falls_within(&self, position: Position) -> bool
-	{
-		(position.x >= self.position.x && position.x < self.position.x + self.size.width)
-			&& (position.y >= self.position.y && position.y < self.position.y + self.size.height)
-	}
-
 	pub fn get_intersection(self, rectangle: Rectangle) -> Option<Rectangle>
 	{
 		let mut intersecting_rectangle = Rectangle {
@@ -382,50 +376,6 @@ mod tests
 		for test_case in test_cases
 		{
 			assert_eq!(test_case.0.get_intersection(test_case.1), test_case.2);
-		}
-	}
-
-	#[test]
-	fn test_rectangle_position_falls_within()
-	{
-		let rectangle = Rectangle {
-			position: Position { x: 0, y: 0 },
-			size: Size {
-				width: 500,
-				height: 500,
-			},
-		};
-
-		let test_cases = [
-			// 3x3 grid with edges outside rectangle
-			(Position { x: -50, y: -50 }, false),
-			(Position { x: 250, y: -50 }, false),
-			(Position { x: 550, y: -50 }, false),
-			(Position { x: -50, y: 250 }, false),
-			(Position { x: 250, y: 250 }, true),
-			(Position { x: 550, y: 250 }, false),
-			(Position { x: -50, y: 550 }, false),
-			(Position { x: 250, y: 550 }, false),
-			(Position { x: 550, y: 550 }, false),
-			// test edge cases (literally)
-			(Position { x: 0, y: 0 }, true),
-			(Position { x: 250, y: 0 }, true),
-			(Position { x: 500, y: 0 }, false),
-			(Position { x: 0, y: 250 }, true),
-			(Position { x: 500, y: 250 }, false),
-			(Position { x: 0, y: 500 }, false),
-			(Position { x: 250, y: 500 }, false),
-			(Position { x: 500, y: 500 }, false),
-			// test corners inside rectangle
-			(Position { x: 50, y: 50 }, true),
-			(Position { x: 450, y: 50 }, true),
-			(Position { x: 50, y: 450 }, true),
-			(Position { x: 450, y: 450 }, true),
-		];
-
-		for test_case in test_cases
-		{
-			assert_eq!(rectangle.position_falls_within(test_case.0), test_case.1);
 		}
 	}
 }

@@ -39,6 +39,8 @@ impl OutputInfo
 	fn get_pixel(&self, position: rectangle::Position) -> [u8; 4]
 	{
 		// TODO: implement other transforms
+		// transforms absolute compositor coordinate into index based on the output
+		// transform
 		let index = match self.transform.as_ref().unwrap()
 		{
 			wl_output::Transform::Normal =>
@@ -95,6 +97,7 @@ impl Dispatch<wl_registry::WlRegistry, ()> for State
 		{
 			match &interface[..]
 			{
+				// get the screencopy manager (used to request capture of an output)
 				"zwlr_screencopy_manager_v1" =>
 				{
 					let wlr_screencopy_manager = registry
@@ -108,6 +111,7 @@ impl Dispatch<wl_registry::WlRegistry, ()> for State
 
 					self.wlr_screencopy_manager = Some(wlr_screencopy_manager);
 				}
+				// get the xdg output manager (used to obtain information of outputs)
 				"zxdg_output_manager_v1" =>
 				{
 					let xdg_output_manager = registry
@@ -121,6 +125,7 @@ impl Dispatch<wl_registry::WlRegistry, ()> for State
 
 					self.xdg_output_manager = Some(xdg_output_manager);
 				}
+				// get the shared memeory object (used to create shared memory pools)
 				"wl_shm" =>
 				{
 					let wl_shm = registry
@@ -129,6 +134,7 @@ impl Dispatch<wl_registry::WlRegistry, ()> for State
 
 					self.wl_shm = Some(wl_shm);
 				}
+				// get the outputs for capture
 				"wl_output" =>
 				{
 					let wl_output = registry
@@ -160,34 +166,6 @@ impl Dispatch<wl_registry::WlRegistry, ()> for State
 	}
 }
 
-impl Dispatch<zwlr_screencopy_manager_v1::ZwlrScreencopyManagerV1, ()> for State
-{
-	fn event(
-		&mut self,
-		_wlr_screencopy_manager: &zwlr_screencopy_manager_v1::ZwlrScreencopyManagerV1,
-		_event: zwlr_screencopy_manager_v1::Event,
-		_: &(),
-		_connection: &Connection,
-		_queue_handle: &QueueHandle<Self>,
-	)
-	{
-	}
-}
-
-impl Dispatch<zxdg_output_manager_v1::ZxdgOutputManagerV1, ()> for State
-{
-	fn event(
-		&mut self,
-		_xdg_output_manager: &zxdg_output_manager_v1::ZxdgOutputManagerV1,
-		_event: zxdg_output_manager_v1::Event,
-		_: &(),
-		_connection: &Connection,
-		_queue_handle: &QueueHandle<Self>,
-	)
-	{
-	}
-}
-
 // sent after all globals have been enumerated
 impl Dispatch<wl_callback::WlCallback, ()> for State
 {
@@ -200,14 +178,14 @@ impl Dispatch<wl_callback::WlCallback, ()> for State
 		_queue_handle: &QueueHandle<Self>,
 	)
 	{
-		match event
+		if let wl_callback::Event::Done { callback_data: _ } = event
 		{
-			wl_callback::Event::Done { callback_data: _ } => self.done = true,
-			_ => println!("Unimplemented callback received, please open an issue."),
+			self.done = true;
 		}
 	}
 }
 
+// dispatch for output events like geometry and name information
 impl Dispatch<wl_output::WlOutput, usize> for State
 {
 	fn event(
@@ -235,6 +213,7 @@ impl Dispatch<wl_output::WlOutput, usize> for State
 	}
 }
 
+// xdg protocol handler for additional output information like position and size
 impl Dispatch<zxdg_output_v1::ZxdgOutputV1, usize> for State
 {
 	fn event(
@@ -248,10 +227,12 @@ impl Dispatch<zxdg_output_v1::ZxdgOutputV1, usize> for State
 	{
 		match event
 		{
+			// logical position is the position in the compositor space accounting for transforms
 			zxdg_output_v1::Event::LogicalPosition { x, y } =>
 			{
 				self.output_infos[*index].logical_position = Some(rectangle::Position { x, y });
 			}
+			// like logical position but for size
 			zxdg_output_v1::Event::LogicalSize { width, height } =>
 			{
 				self.output_infos[*index].logical_size = Some(rectangle::Size { width, height });
@@ -262,6 +243,7 @@ impl Dispatch<zxdg_output_v1::ZxdgOutputV1, usize> for State
 	}
 }
 
+// handle screencopy events
 impl Dispatch<zwlr_screencopy_frame_v1::ZwlrScreencopyFrameV1, usize> for State
 {
 	fn event(
@@ -275,6 +257,7 @@ impl Dispatch<zwlr_screencopy_frame_v1::ZwlrScreencopyFrameV1, usize> for State
 	{
 		match event
 		{
+			// compositor is asking gazo to create a buffer for it to put the screencopy in
 			// TODO: handle other buffer events
 			zwlr_screencopy_frame_v1::Event::Buffer {
 				format,
@@ -283,6 +266,7 @@ impl Dispatch<zwlr_screencopy_frame_v1::ZwlrScreencopyFrameV1, usize> for State
 				stride,
 			} =>
 			{
+				// allocate memory with a file descriptor
 				let raw_fd = memfd::memfd_create(
 					ffi::CStr::from_bytes_with_nul(b"gato\0").unwrap(),
 					memfd::MemFdCreateFlag::MFD_CLOEXEC | memfd::MemFdCreateFlag::MFD_ALLOW_SEALING,
@@ -292,6 +276,7 @@ impl Dispatch<zwlr_screencopy_frame_v1::ZwlrScreencopyFrameV1, usize> for State
 				self.output_infos[*index].image_file =
 					Some(unsafe { fs::File::from_raw_fd(raw_fd) });
 
+				// set file size
 				self.output_infos[*index]
 					.image_file
 					.as_mut()
@@ -299,6 +284,7 @@ impl Dispatch<zwlr_screencopy_frame_v1::ZwlrScreencopyFrameV1, usize> for State
 					.set_len((width * height * 4) as u64)
 					.expect("Failed to allocate memory for screencopy.");
 
+				// create pool from memory
 				let wl_shm_pool = self
 					.wl_shm
 					.as_ref()
@@ -306,6 +292,7 @@ impl Dispatch<zwlr_screencopy_frame_v1::ZwlrScreencopyFrameV1, usize> for State
 					.create_pool(raw_fd, (width * height * 4) as i32, queue_handle, ())
 					.expect("Failed to create pool from wl_shm.");
 
+				// create buffer from pool
 				let wl_buffer = wl_shm_pool
 					.create_buffer(
 						0,
@@ -318,19 +305,23 @@ impl Dispatch<zwlr_screencopy_frame_v1::ZwlrScreencopyFrameV1, usize> for State
 					)
 					.expect("Failed to create buffer from wl_shm_pool.");
 
+				// request copy of screen into buffer
 				wlr_screencopy_frame.copy(&wl_buffer);
 			}
+			// buffer has been filled with screen data
 			zwlr_screencopy_frame_v1::Event::Ready {
 				tv_sec_hi: _,
 				tv_sec_lo: _,
 				tv_nsec: _,
 			} =>
 			{
+				// create an mmap
 				self.output_infos[*index].image_mmap = Some(unsafe {
 					memmap2::Mmap::map(self.output_infos[*index].image_file.as_ref().unwrap())
 						.expect("Failed to create memory mapping")
 				});
 
+				// mark image as ready
 				self.output_infos[*index].image_ready = true;
 			}
 			_ =>
@@ -339,6 +330,7 @@ impl Dispatch<zwlr_screencopy_frame_v1::ZwlrScreencopyFrameV1, usize> for State
 	}
 }
 
+// unused dispatches //
 impl Dispatch<wl_shm::WlShm, ()> for State
 {
 	fn event(
@@ -381,17 +373,48 @@ impl Dispatch<wl_buffer::WlBuffer, ()> for State
 	}
 }
 
+impl Dispatch<zwlr_screencopy_manager_v1::ZwlrScreencopyManagerV1, ()> for State
+{
+	fn event(
+		&mut self,
+		_wlr_screencopy_manager: &zwlr_screencopy_manager_v1::ZwlrScreencopyManagerV1,
+		_event: zwlr_screencopy_manager_v1::Event,
+		_: &(),
+		_connection: &Connection,
+		_queue_handle: &QueueHandle<Self>,
+	)
+	{
+	}
+}
+
+impl Dispatch<zxdg_output_manager_v1::ZxdgOutputManagerV1, ()> for State
+{
+	fn event(
+		&mut self,
+		_xdg_output_manager: &zxdg_output_manager_v1::ZxdgOutputManagerV1,
+		_event: zxdg_output_manager_v1::Event,
+		_: &(),
+		_connection: &Connection,
+		_queue_handle: &QueueHandle<Self>,
+	)
+	{
+	}
+}
+// end unused dispatches //
+
 fn connect_and_get_output_info() -> Result<(State, wayland_client::EventQueue<State>), crate::Error>
 {
 	let connection = Connection::connect_to_env()?;
 
 	let mut event_queue = connection.new_event_queue();
 
+	// wayland global object
 	let wl_display = connection.display();
 
+	// create a registry object to list and bind globals
 	wl_display.get_registry(&event_queue.handle(), ()).unwrap();
 
-	// TODO: try without this line, may be unecessary
+	// ask the compositor to emit a 'done' event once globals have been enumerated
 	wl_display.sync(&event_queue.handle(), ()).unwrap();
 
 	let mut state = State {
@@ -402,7 +425,7 @@ fn connect_and_get_output_info() -> Result<(State, wayland_client::EventQueue<St
 		output_infos: Vec::new(),
 	};
 
-	// run until initial done event and done event has been sent for all wl_outputs
+	// run until done event has been sent for enumerating globals
 	while !state.done
 	{
 		event_queue.blocking_dispatch(&mut state)?;
@@ -432,6 +455,7 @@ fn connect_and_get_output_info() -> Result<(State, wayland_client::EventQueue<St
 	Ok((state, event_queue))
 }
 
+// shared return type for capture functions
 type CaptureReturn = Result<(u32, u32, Vec<u8>), crate::Error>;
 
 pub fn capture_all_outputs(include_cursor: bool) -> CaptureReturn
