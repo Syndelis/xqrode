@@ -24,16 +24,16 @@ fn main()
 		captures.get(4).unwrap().as_str().parse::<i32>().unwrap(),
 	);
 
-	let capture = gazo::capture_region(position, size).unwrap();
-
-	let capture_size = capture.get_size_in_pixels();
+	let (width, height, image_buffer) = gazo::capture_region(position, size, false).unwrap();
 
 	let mut prepared_image = rqrr::PreparedImage::prepare_from_greyscale(
-		capture_size.width as usize,
-		capture_size.height as usize,
+		width as usize,
+		height as usize,
 		move |x, y| {
-			// average the rgb value
-			capture.get_pixel(x, y)[0..3]
+			let index = (y * width as usize * 4) + (x * 4) as usize;
+
+			// average the rgb values for grayscale value
+			image_buffer[index..(index + 3)]
 				.iter()
 				.cloned()
 				.fold(0, |accumulator, item| accumulator + (item / 3))
