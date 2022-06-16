@@ -4,7 +4,7 @@ mod gazo;
 mod rectangle;
 
 pub use crate::{
-	gazo::{capture_all_outputs, capture_region},
+	gazo::{capture_all_outputs, capture_output, capture_region},
 	rectangle::{Position, Size},
 };
 
@@ -14,6 +14,8 @@ pub use crate::{
 #[derive(thiserror::Error, Debug)]
 pub enum Error
 {
+	#[error("output \"{0}\" was not found")]
+	NoOutput(String),
 	#[error("no captures when trying to construct the full capture")]
 	NoCaptures,
 	#[error("failed to connect to the wayland server")]

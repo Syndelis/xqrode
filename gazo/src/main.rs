@@ -1,7 +1,6 @@
-use std::{fs, path::PathBuf, time};
+use std::{fs, path::PathBuf};
 
 use clap::{ArgEnum, Parser};
-use image::ImageEncoder;
 use regex::Regex;
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ArgEnum)]
@@ -9,29 +8,6 @@ enum ImageType
 {
 	Png,
 	Jpeg,
-}
-
-#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ArgEnum)]
-enum Level
-{
-	Fast,
-	Best,
-	Huffman,
-	Rle,
-}
-
-impl From<Level> for image::codecs::png::CompressionType
-{
-	fn from(item: Level) -> Self
-	{
-		match item
-		{
-			Level::Fast => Self::Fast,
-			Level::Best => Self::Best,
-			Level::Huffman => Self::Huffman,
-			Level::Rle => Self::Rle,
-		}
-	}
 }
 
 #[derive(clap::Parser)]
@@ -52,30 +28,15 @@ struct Cli
 	output: Option<String>,
 	#[clap(short('c'), action, help("Include cursors in the screenshot."))]
 	cursor: bool,
-	#[clap(
-		short('t'),
-		arg_enum,
-		value_parser,
-		help("Set the output filetype."),
-		default_value("png")
-	)]
-	image_type: ImageType,
-	#[clap(value_parser)]
+	#[clap(value_parser, help("Location to save the image. Image type is PNG."))]
 	output_file: PathBuf,
-	#[clap(
-		short('l'),
-		value_parser,
-		help("Set the PNG filetype compression level."),
-		default_value("fast")
-	)]
-	level: Level,
 }
 
 fn main()
 {
 	let cli = Cli::parse();
 
-	let (width, height, image_buffer) = if cli.geometry.is_some()
+	let (width, height, image_buffer) = match if cli.geometry.is_some()
 	{
 		// TODO parse geometry using clap
 		let re = Regex::new(r"(-?\d+),(-?\d+) (\d+)x(\d+)").unwrap();
@@ -93,47 +54,39 @@ fn main()
 			captures.get(4).unwrap().as_str().parse::<i32>().unwrap(),
 		);
 
-		gazo::capture_region(position, size, cli.cursor).unwrap()
+		gazo::capture_region(position, size, cli.cursor)
 	}
 	else if cli.output.is_some()
 	{
-		// TODO
-		panic!("UNIMPLEMENTED");
+		gazo::capture_output(cli.output.as_ref().unwrap(), cli.cursor)
 	}
 	else
 	{
-		gazo::capture_all_outputs(cli.cursor).unwrap()
+		gazo::capture_all_outputs(cli.cursor)
+	}
+	{
+		Ok(value) => value,
+		Err(error) =>
+		{
+			eprintln!("There was a problem capturing the screen: {}.", error);
+			std::process::exit(1);
+		}
 	};
 
 	let file = fs::File::create(cli.output_file).unwrap();
 
-	match cli.image_type
-	{
-		ImageType::Png =>
-		{
-			image::codecs::png::PngEncoder::new_with_quality(
-				file,
-				cli.level.into(),
-				image::codecs::png::FilterType::Adaptive,
-			)
-			.write_image(
-				&image_buffer,
-				width as u32,
-				height as u32,
-				image::ColorType::Rgba8,
-			)
-			.unwrap();
-		}
-		ImageType::Jpeg =>
-		{
-			image::codecs::jpeg::JpegEncoder::new(file)
-				.write_image(
-					&image_buffer,
-					width as u32,
-					height as u32,
-					image::ColorType::Rgba8,
-				)
-				.unwrap();
-		}
-	}
+	let mut encoder = mtpng::encoder::Encoder::new(file, &mtpng::encoder::Options::new());
+
+	let mut header = mtpng::Header::new();
+
+	header.set_size(width as u32, height as u32).unwrap();
+	header
+		.set_color(mtpng::ColorType::TruecolorAlpha, 8)
+		.unwrap();
+
+	encoder.write_header(&header).unwrap();
+
+	encoder.write_image_rows(&image_buffer).unwrap();
+
+	encoder.flush().unwrap();
 }

@@ -19,9 +19,11 @@ use crate::rectangle;
 // all coordinates in this crate are absolute in the compositor coordinate space
 // unless otherwise specified as local
 
+#[derive(Debug)]
 struct OutputInfo
 {
 	wl_output: wl_output::WlOutput,
+	name: Option<String>,
 	logical_position: Option<rectangle::Position>,
 	logical_size: Option<rectangle::Size>,
 	transform: Option<wl_output::Transform>,
@@ -140,6 +142,7 @@ impl Dispatch<wl_registry::WlRegistry, ()> for State
 
 					self.output_infos.push(OutputInfo {
 						wl_output,
+						name: None,
 						logical_position: None,
 						logical_size: None,
 						transform: None,
@@ -216,9 +219,18 @@ impl Dispatch<wl_output::WlOutput, usize> for State
 		_queue_handle: &QueueHandle<Self>,
 	)
 	{
-		if let wl_output::Event::Geometry { transform, .. } = event
+		match event
 		{
-			self.output_infos[*index].transform = transform.into_result().ok();
+			wl_output::Event::Geometry { transform, .. } =>
+			{
+				self.output_infos[*index].transform = transform.into_result().ok();
+			}
+			wl_output::Event::Name { name } =>
+			{
+				self.output_infos[*index].name = Some(name);
+			}
+			_ =>
+			{}
 		}
 	}
 }
@@ -422,6 +434,84 @@ fn connect_and_get_output_info() -> Result<(State, wayland_client::EventQueue<St
 
 type CaptureReturn = Result<(u32, u32, Vec<u8>), crate::Error>;
 
+pub fn capture_all_outputs(include_cursor: bool) -> CaptureReturn
+{
+	let (mut state, mut event_queue) = connect_and_get_output_info()?;
+
+	for (i, output_info) in state.output_infos.iter_mut().enumerate()
+	{
+		output_info.image_position = output_info.logical_position;
+		output_info.image_size = output_info.logical_size;
+
+		// TODO: do not unwrap
+		state
+			.wlr_screencopy_manager
+			.as_ref()
+			.unwrap()
+			.capture_output(
+				include_cursor as i32,
+				&output_info.wl_output,
+				&event_queue.handle(),
+				i,
+			)
+			.unwrap();
+	}
+
+	// wait for images to be ready
+	while state
+		.output_infos
+		.iter()
+		.any(|output_info| !output_info.image_ready)
+	{
+		event_queue.blocking_dispatch(&mut state)?;
+	}
+
+	captures_to_buffer(state.output_infos)
+}
+
+pub fn capture_output(output: &str, include_cursor: bool) -> CaptureReturn
+{
+	let (mut state, mut event_queue) = connect_and_get_output_info()?;
+
+	let (output_info_index, _) = state
+		.output_infos
+		.iter()
+		.enumerate()
+		.find(|(_, output_info)| output_info.name.as_ref().unwrap() == output)
+		.ok_or(crate::Error::NoOutput(output.to_owned()))?;
+
+	state.output_infos[output_info_index].image_position = Some(rectangle::Position { x: 0, y: 0 });
+	state.output_infos[output_info_index].image_size =
+		state.output_infos[output_info_index].logical_size;
+
+	state
+		.wlr_screencopy_manager
+		.as_ref()
+		.unwrap()
+		.capture_output(
+			include_cursor as i32,
+			&state.output_infos[output_info_index].wl_output,
+			&event_queue.handle(),
+			output_info_index,
+		)
+		.unwrap();
+
+	while !state.output_infos[output_info_index].image_ready
+	{
+		event_queue.blocking_dispatch(&mut state)?;
+	}
+
+	captures_to_buffer(
+		state
+			.output_infos
+			.into_iter()
+			.enumerate()
+			.filter(|(index, _)| *index == output_info_index)
+			.map(|element| element.1)
+			.collect(),
+	)
+}
+
 pub fn capture_region(
 	region_position: (i32, i32),
 	region_size: (i32, i32),
@@ -508,41 +598,6 @@ pub fn capture_region(
 				image_position_local.y,
 				image_size.width,
 				image_size.height,
-				&event_queue.handle(),
-				i,
-			)
-			.unwrap();
-	}
-
-	// wait for images to be ready
-	while state
-		.output_infos
-		.iter()
-		.any(|output_info| !output_info.image_ready)
-	{
-		event_queue.blocking_dispatch(&mut state)?;
-	}
-
-	captures_to_buffer(state.output_infos)
-}
-
-pub fn capture_all_outputs(include_cursor: bool) -> CaptureReturn
-{
-	let (mut state, mut event_queue) = connect_and_get_output_info()?;
-
-	for (i, output_info) in state.output_infos.iter_mut().enumerate()
-	{
-		output_info.image_position = output_info.logical_position;
-		output_info.image_size = output_info.logical_size;
-
-		// TODO: do not unwrap
-		state
-			.wlr_screencopy_manager
-			.as_ref()
-			.unwrap()
-			.capture_output(
-				include_cursor as i32,
-				&output_info.wl_output,
 				&event_queue.handle(),
 				i,
 			)
