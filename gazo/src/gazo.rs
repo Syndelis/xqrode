@@ -473,16 +473,29 @@ pub fn capture_output(output: &str, include_cursor: bool) -> CaptureReturn
 {
 	let (mut state, mut event_queue) = connect_and_get_output_info()?;
 
-	let (output_info_index, _) = state
+	state.output_infos = state
 		.output_infos
-		.iter()
-		.enumerate()
-		.find(|(_, output_info)| output_info.name.as_ref().unwrap() == output)
-		.ok_or(crate::Error::NoOutput(output.to_owned()))?;
+		.into_iter()
+		.filter(|output_info| {
+			if output_info.name.as_ref().unwrap() == output
+			{
+				true
+			}
+			else
+			{
+				output_info.wl_output.release();
+				false
+			}
+		})
+		.collect();
 
-	state.output_infos[output_info_index].image_position = Some(rectangle::Position { x: 0, y: 0 });
-	state.output_infos[output_info_index].image_size =
-		state.output_infos[output_info_index].logical_size;
+	if state.output_infos.is_empty()
+	{
+		return Err(crate::Error::NoOutput(output.to_owned()));
+	}
+
+	state.output_infos[0].image_position = Some(rectangle::Position { x: 0, y: 0 });
+	state.output_infos[0].image_size = state.output_infos[0].logical_size;
 
 	state
 		.wlr_screencopy_manager
@@ -490,26 +503,18 @@ pub fn capture_output(output: &str, include_cursor: bool) -> CaptureReturn
 		.unwrap()
 		.capture_output(
 			include_cursor as i32,
-			&state.output_infos[output_info_index].wl_output,
+			&state.output_infos[0].wl_output,
 			&event_queue.handle(),
-			output_info_index,
+			0,
 		)
 		.unwrap();
 
-	while !state.output_infos[output_info_index].image_ready
+	while !state.output_infos[0].image_ready
 	{
 		event_queue.blocking_dispatch(&mut state)?;
 	}
 
-	captures_to_buffer(
-		state
-			.output_infos
-			.into_iter()
-			.enumerate()
-			.filter(|(index, _)| *index == output_info_index)
-			.map(|element| element.1)
-			.collect(),
-	)
+	captures_to_buffer(state.output_infos)
 }
 
 pub fn capture_region(
