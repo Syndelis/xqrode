@@ -33,10 +33,10 @@ fn main()
 			let index = (y * width as usize * 4) + (x * 4) as usize;
 
 			// average the rgb values for grayscale value
-			image_buffer[index..(index + 3)]
-				.iter()
-				.cloned()
-				.fold(0, |accumulator, item| accumulator + (item / 3))
+			// must be divided individually
+			(image_buffer[index] / 3)
+				+ (image_buffer[index + 1] / 3)
+				+ (image_buffer[index + 2] / 3)
 		},
 	);
 
