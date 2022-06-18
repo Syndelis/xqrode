@@ -67,20 +67,43 @@ impl OutputCapture
 {
 	fn get_image_pixel(&self, position: rectangle::Position) -> [u8; 4]
 	{
-		// transforms absolute compositor coordinate into index based on the output
-		// transform
+		// convert to output local coordinate
+		let (x, y) = (
+			position.x - self.image_position.x,
+			position.y - self.image_position.y,
+		);
+
+		// transforms output local coordinate into index based on the output transform
 		let index = match self.transform
 		{
-			wl_output::Transform::Normal =>
+			wl_output::Transform::Normal => (x + (y * self.image_size.width)) * 4,
+			wl_output::Transform::_90 =>
 			{
-				((position.x - self.image_position.x)
-					+ ((position.y - self.image_position.y) * self.image_size.width))
+				(((self.image_size.width - x - 1) * self.image_size.height) + y) * 4
+			}
+			wl_output::Transform::_180 =>
+			{
+				((self.image_size.width - x - 1)
+					+ ((self.image_size.height - y - 1) * self.image_size.width))
 					* 4
 			}
 			wl_output::Transform::_270 =>
 			{
-				(((position.x - self.image_position.x) * self.image_size.height)
-					+ (self.image_size.height - (position.y - self.image_position.y) - 1))
+				((x * self.image_size.height) + (self.image_size.height - y - 1)) * 4
+			}
+			wl_output::Transform::Flipped =>
+			{
+				((self.image_size.width - x - 1) + (y * self.image_size.width)) * 4
+			}
+			wl_output::Transform::Flipped90 => ((x * self.image_size.height) + y) * 4,
+			wl_output::Transform::Flipped180 =>
+			{
+				(x + ((self.image_size.height - y - 1) * self.image_size.width)) * 4
+			}
+			wl_output::Transform::Flipped270 =>
+			{
+				(((self.image_size.width - x - 1) * self.image_size.height)
+					+ (self.image_size.height - y - 1))
 					* 4
 			}
 			_ => panic!("AHHHH"),
