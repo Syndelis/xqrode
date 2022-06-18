@@ -1,11 +1,11 @@
 #![feature(type_alias_impl_trait)]
 
-mod gazo;
 mod rectangle;
+mod wayland;
 
 pub use crate::{
-	gazo::{capture_all_outputs, capture_output, capture_region},
 	rectangle::{Position, Size},
+	wayland::{capture_all_outputs, capture_output, capture_region},
 };
 
 // All coordinates in this crate are absolute in the compositor coordinate space

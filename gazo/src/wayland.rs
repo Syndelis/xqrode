@@ -13,13 +13,17 @@ use wayland_protocols_wlr::screencopy::v1::client::{
 
 use crate::rectangle;
 
-// TODO: look into delegate dispatch to avoid storing OutputInfos as a Vec in
-// State and having to pass an index to access them when needed.
-
 // all coordinates in this crate are absolute in the compositor coordinate space
 // unless otherwise specified as local
 
-#[derive(Debug)]
+#[derive(Clone, Copy)]
+enum PixelFormat
+{
+	Argb8888,
+	Xrgb8888,
+	Xbgr8888,
+}
+
 struct OutputInfo
 {
 	wl_output: wl_output::WlOutput,
@@ -27,45 +31,93 @@ struct OutputInfo
 	logical_position: Option<rectangle::Position>,
 	logical_size: Option<rectangle::Size>,
 	transform: Option<wl_output::Transform>,
-	image_file: Option<fs::File>, // file is backed by RAM
+	image_file: Option<fs::File>,
 	image_mmap: Option<memmap2::Mmap>,
 	image_position: Option<rectangle::Position>,
 	image_size: Option<rectangle::Size>,
+	image_pixel_format: Option<PixelFormat>,
 	image_ready: bool,
 }
 
-impl OutputInfo
+#[allow(clippy::from_over_into)]
+impl Into<OutputCapture> for OutputInfo
 {
-	fn get_pixel(&self, position: rectangle::Position) -> [u8; 4]
+	fn into(self) -> OutputCapture
 	{
-		// TODO: implement other transforms
+		OutputCapture {
+			transform: self.transform.unwrap(),
+			image_mmap: self.image_mmap.unwrap(),
+			image_position: self.image_position.unwrap(),
+			image_size: self.image_size.unwrap(),
+			image_pixel_format: self.image_pixel_format.unwrap(),
+		}
+	}
+}
+
+struct OutputCapture
+{
+	transform: wl_output::Transform,
+	image_mmap: memmap2::Mmap,
+	image_position: rectangle::Position,
+	image_size: rectangle::Size,
+	image_pixel_format: PixelFormat,
+}
+
+impl OutputCapture
+{
+	fn get_image_pixel(&self, position: rectangle::Position) -> [u8; 4]
+	{
 		// transforms absolute compositor coordinate into index based on the output
 		// transform
-		let index = match self.transform.as_ref().unwrap()
+		let index = match self.transform
 		{
 			wl_output::Transform::Normal =>
 			{
-				((position.x - self.image_position.unwrap().x)
-					+ ((position.y - self.image_position.unwrap().y)
-						* self.image_size.unwrap().width))
+				((position.x - self.image_position.x)
+					+ ((position.y - self.image_position.y) * self.image_size.width))
 					* 4
 			}
 			wl_output::Transform::_270 =>
 			{
-				(((position.x - self.image_position.unwrap().x) * self.image_size.unwrap().height)
-					+ (self.image_size.unwrap().height
-						- (position.y - self.image_position.unwrap().y)
-						- 1)) * 4
+				(((position.x - self.image_position.x) * self.image_size.height)
+					+ (self.image_size.height - (position.y - self.image_position.y) - 1))
+					* 4
 			}
 			_ => panic!("AHHHH"),
 		};
 
-		[
-			self.image_mmap.as_ref().unwrap()[index as usize], // R
-			self.image_mmap.as_ref().unwrap()[(index + 1) as usize], // G
-			self.image_mmap.as_ref().unwrap()[(index + 2) as usize], // B
-			self.image_mmap.as_ref().unwrap()[(index + 3) as usize], // A
-		]
+		let index = index as usize;
+
+		match self.image_pixel_format
+		{
+			PixelFormat::Argb8888 =>
+			{
+				[
+					self.image_mmap[index + 2],
+					self.image_mmap[index + 1],
+					self.image_mmap[index],
+					self.image_mmap[index + 3],
+				]
+			}
+			PixelFormat::Xbgr8888 =>
+			{
+				[
+					self.image_mmap[index],
+					self.image_mmap[index + 1],
+					self.image_mmap[index + 2],
+					255,
+				]
+			}
+			PixelFormat::Xrgb8888 =>
+			{
+				[
+					self.image_mmap[index + 2],
+					self.image_mmap[index + 1],
+					self.image_mmap[index],
+					255,
+				]
+			}
+		}
 	}
 }
 
@@ -156,6 +208,7 @@ impl Dispatch<wl_registry::WlRegistry, ()> for State
 						image_mmap: None,
 						image_position: None,
 						image_size: None,
+						image_pixel_format: None,
 						image_ready: false,
 					});
 				}
@@ -266,6 +319,17 @@ impl Dispatch<zwlr_screencopy_frame_v1::ZwlrScreencopyFrameV1, usize> for State
 				stride,
 			} =>
 			{
+				let format = format.into_result().unwrap();
+
+				// check for valid format
+				self.output_infos[*index].image_pixel_format = match format
+				{
+					wl_shm::Format::Argb8888 => Some(PixelFormat::Argb8888),
+					wl_shm::Format::Xrgb8888 => Some(PixelFormat::Xrgb8888),
+					wl_shm::Format::Xbgr8888 => Some(PixelFormat::Xbgr8888),
+					_ => return,
+				};
+
 				// allocate memory with a file descriptor
 				let raw_fd = memfd::memfd_create(
 					ffi::CStr::from_bytes_with_nul(b"gato\0").unwrap(),
@@ -299,7 +363,7 @@ impl Dispatch<zwlr_screencopy_frame_v1::ZwlrScreencopyFrameV1, usize> for State
 						width as i32,
 						height as i32,
 						stride as i32,
-						format.into_result().unwrap(),
+						format,
 						queue_handle,
 						(),
 					)
@@ -645,29 +709,34 @@ pub fn capture_region(
 	captures_to_buffer(state.output_infos)
 }
 
-fn captures_to_buffer(captures: Vec<OutputInfo>) -> CaptureReturn
+fn captures_to_buffer(output_infos: Vec<OutputInfo>) -> CaptureReturn
 {
-	if captures.is_empty()
+	if output_infos.is_empty()
 	{
 		return Err(crate::Error::NoCaptures);
 	}
 
-	let mut upper_left = captures[0].image_position.unwrap();
-	let mut bottom_right = upper_left + captures[0].image_size.unwrap();
+	let output_captures: Vec<OutputCapture> = output_infos
+		.into_iter()
+		.map(|output_info| output_info.into())
+		.collect();
 
-	for capture in &captures[1..]
+	let mut upper_left = output_captures[0].image_position;
+	let mut bottom_right = upper_left + output_captures[0].image_size;
+
+	for capture in &output_captures[1..]
 	{
-		upper_left.x = cmp::min(capture.image_position.unwrap().x, upper_left.x);
+		upper_left.x = cmp::min(capture.image_position.x, upper_left.x);
 
-		upper_left.y = cmp::min(capture.image_position.unwrap().y, upper_left.y);
+		upper_left.y = cmp::min(capture.image_position.y, upper_left.y);
 
 		bottom_right.x = cmp::max(
-			capture.image_position.unwrap().x + capture.image_size.unwrap().width,
+			capture.image_position.x + capture.image_size.width,
 			bottom_right.x,
 		);
 
 		bottom_right.y = cmp::max(
-			capture.image_position.unwrap().y + capture.image_size.unwrap().height,
+			capture.image_position.y + capture.image_size.height,
 			bottom_right.y,
 		);
 	}
@@ -679,32 +748,31 @@ fn captures_to_buffer(captures: Vec<OutputInfo>) -> CaptureReturn
 
 	let mut buffer: Vec<u8> = vec![0; size.width as usize * size.height as usize * 4];
 
-	for capture in &captures
+	for output_capture in &output_captures
 	{
-		let position_offset = capture.image_position.unwrap() - upper_left;
+		let position_offset = output_capture.image_position - upper_left;
 
-		for y in 0..capture.image_size.unwrap().height
+		for y in 0..output_capture.image_size.height
 		{
-			for x in 0..capture.image_size.unwrap().width
+			for x in 0..output_capture.image_size.width
 			{
-				// TODO add offset to x and y from for loops and use to calculate buff index
 				// convert to absolute coordinates
 				let position = rectangle::Position {
-					x: x + capture.image_position.unwrap().x,
-					y: y + capture.image_position.unwrap().y,
+					x: x + output_capture.image_position.x,
+					y: y + output_capture.image_position.y,
 				};
 
-				// println!("capture position: {:?}", capture.image_position.unwrap());
-
-				let pixel = capture.get_pixel(position);
+				let pixel = output_capture.get_image_pixel(position);
 
 				let index =
 					((position_offset.y + y) * (size.width * 4)) + ((position_offset.x + x) * 4);
 
-				buffer[index as usize] = pixel[0];
-				buffer[(index as usize) + 1] = pixel[1];
-				buffer[(index as usize) + 2] = pixel[2];
-				buffer[(index as usize) + 3] = pixel[3];
+				let index = index as usize;
+
+				buffer[index] = pixel[0];
+				buffer[index + 1] = pixel[1];
+				buffer[index + 2] = pixel[2];
+				buffer[index + 3] = pixel[3];
 			}
 		}
 	}
