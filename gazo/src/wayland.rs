@@ -31,6 +31,7 @@ struct OutputInfo
 	logical_position: Option<rectangle::Position>,
 	logical_size: Option<rectangle::Size>,
 	transform: Option<wl_output::Transform>,
+	scale_factor: i32,
 	image_file: Option<fs::File>,
 	image_mmap: Option<memmap2::Mmap>,
 	image_position: Option<rectangle::Position>,
@@ -65,6 +66,7 @@ struct OutputCapture
 
 impl OutputCapture
 {
+	// TODO: handle scaling
 	fn get_image_pixel(&self, position: rectangle::Position) -> [u8; 4]
 	{
 		// convert to output local coordinate
@@ -73,38 +75,33 @@ impl OutputCapture
 			position.y - self.image_position.y,
 		);
 
+		let image_size = self.image_size;
+
 		// transforms output local coordinate into index based on the output transform
 		let index = match self.transform
 		{
 			wl_output::Transform::Normal => (x + (y * self.image_size.width)) * 4,
-			wl_output::Transform::_90 =>
-			{
-				(((self.image_size.width - x - 1) * self.image_size.height) + y) * 4
-			}
+			wl_output::Transform::_90 => (((image_size.width - x - 1) * image_size.height) + y) * 4,
 			wl_output::Transform::_180 =>
 			{
-				((self.image_size.width - x - 1)
-					+ ((self.image_size.height - y - 1) * self.image_size.width))
-					* 4
+				((image_size.width - x - 1) + ((image_size.height - y - 1) * image_size.width)) * 4
 			}
 			wl_output::Transform::_270 =>
 			{
-				((x * self.image_size.height) + (self.image_size.height - y - 1)) * 4
+				((x * image_size.height) + (image_size.height - y - 1)) * 4
 			}
 			wl_output::Transform::Flipped =>
 			{
-				((self.image_size.width - x - 1) + (y * self.image_size.width)) * 4
+				((image_size.width - x - 1) + (y * image_size.width)) * 4
 			}
-			wl_output::Transform::Flipped90 => ((x * self.image_size.height) + y) * 4,
+			wl_output::Transform::Flipped90 => ((x * image_size.height) + y) * 4,
 			wl_output::Transform::Flipped180 =>
 			{
-				(x + ((self.image_size.height - y - 1) * self.image_size.width)) * 4
+				(x + ((image_size.height - y - 1) * image_size.width)) * 4
 			}
 			wl_output::Transform::Flipped270 =>
 			{
-				(((self.image_size.width - x - 1) * self.image_size.height)
-					+ (self.image_size.height - y - 1))
-					* 4
+				(((image_size.width - x - 1) * image_size.height) + (image_size.height - y - 1)) * 4
 			}
 			_ => panic!("AHHHH"),
 		};
@@ -227,6 +224,7 @@ impl Dispatch<wl_registry::WlRegistry, ()> for State
 						logical_position: None,
 						logical_size: None,
 						transform: None,
+						scale_factor: 1,
 						image_file: None,
 						image_mmap: None,
 						image_position: None,
@@ -282,6 +280,11 @@ impl Dispatch<wl_output::WlOutput, usize> for State
 			wl_output::Event::Name { name } =>
 			{
 				self.output_infos[*index].name = Some(name);
+			}
+			wl_output::Event::Scale { factor } =>
+			{
+				self.output_infos[*index].scale_factor = factor;
+				println!("Scale factor: {}", factor);
 			}
 			_ =>
 			{}
@@ -545,6 +548,8 @@ fn connect_and_get_output_info() -> Result<(State, wayland_client::EventQueue<St
 // shared return type for capture functions
 type CaptureReturn = Result<(u32, u32, Vec<u8>), crate::Error>;
 
+/// This function will capture the entirety of all outputs and composite them
+/// into a single Vec<u8>
 pub fn capture_all_outputs(include_cursor: bool) -> CaptureReturn
 {
 	let (mut state, mut event_queue) = connect_and_get_output_info()?;
@@ -580,7 +585,9 @@ pub fn capture_all_outputs(include_cursor: bool) -> CaptureReturn
 	captures_to_buffer(state.output_infos)
 }
 
-pub fn capture_output(output: &str, include_cursor: bool) -> CaptureReturn
+/// This function will capture the output specified in the `name` field of the
+/// arguments.
+pub fn capture_output(name: &str, include_cursor: bool) -> CaptureReturn
 {
 	let (mut state, mut event_queue) = connect_and_get_output_info()?;
 
@@ -588,7 +595,7 @@ pub fn capture_output(output: &str, include_cursor: bool) -> CaptureReturn
 		.output_infos
 		.into_iter()
 		.filter(|output_info| {
-			if output_info.name.as_ref().unwrap() == output
+			if output_info.name.as_ref().unwrap() == name
 			{
 				true
 			}
@@ -602,7 +609,7 @@ pub fn capture_output(output: &str, include_cursor: bool) -> CaptureReturn
 
 	if state.output_infos.is_empty()
 	{
-		return Err(crate::Error::NoOutput(output.to_owned()));
+		return Err(crate::Error::NoOutput(name.to_owned()));
 	}
 
 	state.output_infos[0].image_position = Some(rectangle::Position { x: 0, y: 0 });
@@ -628,6 +635,11 @@ pub fn capture_output(output: &str, include_cursor: bool) -> CaptureReturn
 	captures_to_buffer(state.output_infos)
 }
 
+/// This function will capture the region of the compositor specified by the
+/// `region_position` and `region_size` arguments. The `region_position` should
+/// be the top left corner of the region with the `region_size` expanding from
+/// there. This will be the same as the default output provided by
+/// <a href = "https://github.com/emersion/slurp" target = "_blank">slurp</a>.
 pub fn capture_region(
 	region_position: (i32, i32),
 	region_size: (i32, i32),
@@ -635,8 +647,8 @@ pub fn capture_region(
 ) -> CaptureReturn
 {
 	let region_rectangle = rectangle::Rectangle {
-		position: rectangle::Position::new(region_position),
-		size: rectangle::Size::new(region_size),
+		position: rectangle::Position::new(region_position.0, region_position.1),
+		size: rectangle::Size::new(region_size.0, region_size.1),
 	};
 
 	let (mut state, mut event_queue) = connect_and_get_output_info()?;
@@ -771,6 +783,8 @@ fn captures_to_buffer(output_infos: Vec<OutputInfo>) -> CaptureReturn
 
 	let mut buffer: Vec<u8> = vec![0; size.width as usize * size.height as usize * 4];
 
+	let time = std::time::Instant::now();
+
 	for output_capture in &output_captures
 	{
 		let position_offset = output_capture.image_position - upper_left;
@@ -799,6 +813,8 @@ fn captures_to_buffer(output_infos: Vec<OutputInfo>) -> CaptureReturn
 			}
 		}
 	}
+
+	println!("{:?}", time.elapsed());
 
 	Ok((size.width as u32, size.height as u32, buffer))
 }
