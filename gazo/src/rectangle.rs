@@ -9,12 +9,9 @@ pub struct Position
 
 impl Position
 {
-	pub fn new(position: (i32, i32)) -> Self
+	pub fn new(x: i32, y: i32) -> Self
 	{
-		Position {
-			x: position.0,
-			y: position.1,
-		}
+		Position { x, y }
 	}
 }
 
@@ -64,12 +61,9 @@ impl From<(i32, i32)> for Size
 
 impl Size
 {
-	pub fn new(size: (i32, i32)) -> Self
+	pub fn new(width: i32, height: i32) -> Self
 	{
-		Size {
-			width: size.0,
-			height: size.1,
-		}
+		Size { width, height }
 	}
 }
 
@@ -149,11 +143,11 @@ impl Rectangle
 			},
 		};
 
-		if (self.position.x..=self.position.x + self.size.width).contains(&rectangle.position.x)
+		if (self.position.x..self.position.x + self.size.width).contains(&rectangle.position.x)
 		{
 			intersecting_rectangle.position.x = rectangle.position.x;
 		}
-		else if (rectangle.position.x..=rectangle.position.x + rectangle.size.width)
+		else if (rectangle.position.x..rectangle.position.x + rectangle.size.width)
 			.contains(&self.position.x)
 		{
 			intersecting_rectangle.position.x = self.position.x;
@@ -163,11 +157,11 @@ impl Rectangle
 			return None;
 		}
 
-		if (self.position.y..=self.position.y + self.size.height).contains(&rectangle.position.y)
+		if (self.position.y..self.position.y + self.size.height).contains(&rectangle.position.y)
 		{
 			intersecting_rectangle.position.y = rectangle.position.y;
 		}
-		else if (rectangle.position.y..=rectangle.position.y + rectangle.size.height)
+		else if (rectangle.position.y..rectangle.position.y + rectangle.size.height)
 			.contains(&self.position.y)
 		{
 			intersecting_rectangle.position.y = self.position.y;
@@ -232,12 +226,12 @@ mod tests
 			// |_______|   |_______|
 			(
 				Rectangle {
-					position: Position::new((0, 0)),
-					size: Size::new((500, 500)),
+					position: Position::new(0, 0),
+					size: Size::new(500, 500),
 				},
 				Rectangle {
-					position: Position::new((-1000, 0)),
-					size: Size::new((500, 500)),
+					position: Position::new(-1000, 0),
+					size: Size::new(500, 500),
 				},
 				None,
 			),
@@ -247,16 +241,16 @@ mod tests
 			// |____|__|____|
 			(
 				Rectangle {
-					position: Position::new((0, 0)),
-					size: Size::new((500, 500)),
+					position: Position::new(0, 0),
+					size: Size::new(500, 500),
 				},
 				Rectangle {
-					position: Position::new((-250, 0)),
-					size: Size::new((500, 500)),
+					position: Position::new(-250, 0),
+					size: Size::new(500, 500),
 				},
 				Some(Rectangle {
-					position: Position::new((0, 0)),
-					size: Size::new((250, 500)),
+					position: Position::new(0, 0),
+					size: Size::new(250, 500),
 				}),
 			),
 			// ______________
@@ -265,16 +259,16 @@ mod tests
 			// |____|__|____|
 			(
 				Rectangle {
-					position: Position::new((0, 0)),
-					size: Size::new((500, 500)),
+					position: Position::new(0, 0),
+					size: Size::new(500, 500),
 				},
 				Rectangle {
-					position: Position::new((250, 0)),
-					size: Size::new((500, 500)),
+					position: Position::new(250, 0),
+					size: Size::new(500, 500),
 				},
 				Some(Rectangle {
-					position: Position::new((250, 0)),
-					size: Size::new((250, 500)),
+					position: Position::new(250, 0),
+					size: Size::new(250, 500),
 				}),
 			),
 			// _________   _________
@@ -283,12 +277,12 @@ mod tests
 			// |_______|   |_______|
 			(
 				Rectangle {
-					position: Position::new((0, 0)),
-					size: Size::new((500, 500)),
+					position: Position::new(0, 0),
+					size: Size::new(500, 500),
 				},
 				Rectangle {
-					position: Position::new((1000, 0)),
-					size: Size::new((500, 500)),
+					position: Position::new(1000, 0),
+					size: Size::new(500, 500),
 				},
 				None,
 			),
@@ -303,12 +297,12 @@ mod tests
 			// |_______|
 			(
 				Rectangle {
-					position: Position::new((0, 0)),
-					size: Size::new((500, 500)),
+					position: Position::new(0, 0),
+					size: Size::new(500, 500),
 				},
 				Rectangle {
-					position: Position::new((0, -1000)),
-					size: Size::new((500, 500)),
+					position: Position::new(0, -1000),
+					size: Size::new(500, 500),
 				},
 				None,
 			),
@@ -320,16 +314,16 @@ mod tests
 			// |_______|
 			(
 				Rectangle {
-					position: Position::new((0, 0)),
-					size: Size::new((500, 500)),
+					position: Position::new(0, 0),
+					size: Size::new(500, 500),
 				},
 				Rectangle {
-					position: Position::new((0, -250)),
-					size: Size::new((500, 500)),
+					position: Position::new(0, -250),
+					size: Size::new(500, 500),
 				},
 				Some(Rectangle {
-					position: Position::new((0, 0)),
-					size: Size::new((500, 250)),
+					position: Position::new(0, 0),
+					size: Size::new(500, 250),
 				}),
 			),
 			// _________
@@ -340,16 +334,16 @@ mod tests
 			// |_______|
 			(
 				Rectangle {
-					position: Position::new((0, 0)),
-					size: Size::new((500, 500)),
+					position: Position::new(0, 0),
+					size: Size::new(500, 500),
 				},
 				Rectangle {
-					position: Position::new((0, 250)),
-					size: Size::new((500, 500)),
+					position: Position::new(0, 250),
+					size: Size::new(500, 500),
 				},
 				Some(Rectangle {
-					position: Position::new((0, 250)),
-					size: Size::new((500, 250)),
+					position: Position::new(0, 250),
+					size: Size::new(500, 250),
 				}),
 			),
 			// _________
@@ -362,12 +356,73 @@ mod tests
 			// |_______|
 			(
 				Rectangle {
-					position: Position::new((0, 0)),
-					size: Size::new((500, 500)),
+					position: Position::new(0, 0),
+					size: Size::new(500, 500),
 				},
 				Rectangle {
-					position: Position::new((0, 1000)),
-					size: Size::new((500, 500)),
+					position: Position::new(0, 1000),
+					size: Size::new(500, 500),
+				},
+				None,
+			),
+			// edge cases
+		];
+
+		for test_case in test_cases
+		{
+			assert_eq!(test_case.0.get_intersection(test_case.1), test_case.2);
+		}
+	}
+
+	#[test]
+	fn test_rectangle_get_intersection_edge_cases()
+	{
+		let test_cases = [
+			// top edge
+			(
+				Rectangle {
+					position: Position::new(0, 0),
+					size: Size::new(500, 500),
+				},
+				Rectangle {
+					position: Position::new(0, -500),
+					size: Size::new(500, 500),
+				},
+				None,
+			),
+			// left edge
+			(
+				Rectangle {
+					position: Position::new(0, 0),
+					size: Size::new(500, 500),
+				},
+				Rectangle {
+					position: Position::new(500, 0),
+					size: Size::new(500, 500),
+				},
+				None,
+			),
+			// bottom edge
+			(
+				Rectangle {
+					position: Position::new(0, 0),
+					size: Size::new(500, 500),
+				},
+				Rectangle {
+					position: Position::new(0, 500),
+					size: Size::new(500, 500),
+				},
+				None,
+			),
+			// left edge
+			(
+				Rectangle {
+					position: Position::new(0, 0),
+					size: Size::new(500, 500),
+				},
+				Rectangle {
+					position: Position::new(-500, 0),
+					size: Size::new(500, 500),
 				},
 				None,
 			),
