@@ -1,121 +1,109 @@
 use wayland_client::protocol::wl_output;
 
-pub(crate) struct OutputCapture
+pub(crate) fn create_transform_corrected_buffer(
+	transform: wl_output::Transform,
+	image_mmap: memmap2::MmapMut,
+	image_mmap_size: crate::rectangle::Size,
+	image_pixel_format: crate::wayland::PixelFormat,
+) -> (usize, usize, memmap2::MmapMut)
 {
-	pub transform: wl_output::Transform,
-	pub image_mmap: memmap2::MmapMut,
-	pub image_mmap_size: crate::rectangle::Size,
-	pub image_logical_position: crate::rectangle::Position,
-	pub image_logical_size: crate::rectangle::Size,
-	pub image_pixel_format: crate::wayland::PixelFormat,
-}
+	let mut mmap = memmap2::MmapMut::map_anon(
+		image_mmap_size.width as usize * image_mmap_size.height as usize * 4,
+	)
+	.unwrap();
 
-impl OutputCapture
-{
-	pub fn get_transform_corrected_buffer(self) -> (usize, usize, memmap2::MmapMut)
+	// width and height are switched odd numbered rotations (1 90 degree, or 3 90
+	// degree)
+	let (transformed_width, transformed_height) = match transform
 	{
-		let mut mmap = memmap2::MmapMut::map_anon(
-			self.image_mmap_size.width as usize * self.image_mmap_size.height as usize * 4,
-		)
-		.unwrap();
+		wl_output::Transform::_90
+		| wl_output::Transform::_270
+		| wl_output::Transform::Flipped90
+		| wl_output::Transform::Flipped270 => (image_mmap_size.height, image_mmap_size.width),
+		_ => (image_mmap_size.width, image_mmap_size.height),
+	};
 
-		let transform = self.transform;
-
-		// width and height are switched odd numbered rotations (1 90 degree, or 3 90
-		// degree)
-		let (transformed_width, transformed_height) = match transform
+	// loop over buffer in local coordinate space
+	for y in 0..image_mmap_size.height
+	{
+		for x in 0..image_mmap_size.width
 		{
-			wl_output::Transform::_90
-			| wl_output::Transform::_270
-			| wl_output::Transform::Flipped90
-			| wl_output::Transform::Flipped270 => (self.image_mmap_size.height, self.image_mmap_size.width),
-			_ => (self.image_mmap_size.width, self.image_mmap_size.height),
-		};
-
-		// loop over buffer in local coordinate space
-		for y in 0..self.image_mmap_size.height
-		{
-			for x in 0..self.image_mmap_size.width
-			{
-				// the index in the new mmap
-				let destination_index = {
-					// apply clock wise rotation transformation and calculate index
-					let (x, y) = match transform
+			// the index in the new mmap
+			let destination_index = {
+				// apply clock wise rotation transformation and calculate index
+				let (x, y) = match transform
+				{
+					wl_output::Transform::Normal | wl_output::Transform::Flipped => (x, y),
+					wl_output::Transform::_90 | wl_output::Transform::Flipped90 =>
 					{
-						wl_output::Transform::Normal | wl_output::Transform::Flipped => (x, y),
-						wl_output::Transform::_90 | wl_output::Transform::Flipped90 =>
-						{
-							(self.image_mmap_size.height - y - 1, x)
-						}
-						wl_output::Transform::_180 | wl_output::Transform::Flipped180 =>
-						{
-							(
-								self.image_mmap_size.width - x - 1,
-								self.image_mmap_size.height - y - 1,
-							)
-						}
-						wl_output::Transform::_270 | wl_output::Transform::Flipped270 =>
-						{
-							(y, self.image_mmap_size.width - x - 1)
-						}
-						_ =>
-						{
-							panic!(
-								"Unimplemented transform found, please report this to the Gazo \
-								 crate."
-							);
-						}
-					};
-
-					// conditionally calculate index for flipped variants
-					(match transform
+						(image_mmap_size.height - y - 1, x)
+					}
+					wl_output::Transform::_180 | wl_output::Transform::Flipped180 =>
 					{
-						wl_output::Transform::Flipped
-						| wl_output::Transform::Flipped90
-						| wl_output::Transform::Flipped180
-						| wl_output::Transform::Flipped270 =>
-						{
-							((y * transformed_width) + (transformed_width - x - 1)) * 4
-						}
-						_ => ((y * transformed_width) + x) * 4,
-					}) as usize
+						(
+							image_mmap_size.width - x - 1,
+							image_mmap_size.height - y - 1,
+						)
+					}
+					wl_output::Transform::_270 | wl_output::Transform::Flipped270 =>
+					{
+						(y, image_mmap_size.width - x - 1)
+					}
+					_ =>
+					{
+						panic!(
+							"Unimplemented transform found, please report this to the Gazo crate."
+						);
+					}
 				};
 
-				// the index of the mmap in self
-				let source_index = (((y * self.image_mmap_size.width) + x) * 4) as usize;
+				// conditionally calculate index for flipped variants
+				(match transform
+				{
+					wl_output::Transform::Flipped
+					| wl_output::Transform::Flipped90
+					| wl_output::Transform::Flipped180
+					| wl_output::Transform::Flipped270 =>
+					{
+						((y * transformed_width) + (transformed_width - x - 1)) * 4
+					}
+					_ => ((y * transformed_width) + x) * 4,
+				}) as usize
+			};
 
-				// transform the pixel to Rgba8888
-				let transformed_pixel = Self::transform_pixel(self.image_pixel_format, unsafe {
-					self.image_mmap
-						.get_unchecked(source_index..(source_index + 4))
-				});
+			// the index of the mmap in self
+			let source_index = (((y * image_mmap_size.width) + x) * 4) as usize;
 
-				// put the pixel in the new mmap at the correct index
-				mmap[destination_index] = transformed_pixel[0];
-				mmap[destination_index + 1] = transformed_pixel[1];
-				mmap[destination_index + 2] = transformed_pixel[2];
-				mmap[destination_index + 3] = transformed_pixel[3];
-			}
+			// transform the pixel to Rgba8888
+			let transformed_pixel = transform_pixel(image_pixel_format, unsafe {
+				image_mmap.get_unchecked(source_index..(source_index + 4))
+			});
+
+			// put the pixel in the new mmap at the correct index
+			mmap[destination_index] = transformed_pixel[0];
+			mmap[destination_index + 1] = transformed_pixel[1];
+			mmap[destination_index + 2] = transformed_pixel[2];
+			mmap[destination_index + 3] = transformed_pixel[3];
 		}
-
-		// return the width, height, and mmap as the width and height will be corrected
-		// for some transforms
-		(
-			transformed_width as usize,
-			transformed_height as usize,
-			mmap,
-		)
 	}
 
-	// turn image pixel format into Rgba8888
-	fn transform_pixel(image_pixel_format: crate::wayland::PixelFormat, pixel: &[u8]) -> [u8; 4]
+	// return the width, height, and mmap as the width and height will be corrected
+	// for some transforms
+	(
+		transformed_width as usize,
+		transformed_height as usize,
+		mmap,
+	)
+}
+
+// turn image pixel format into Rgba8888
+fn transform_pixel(image_pixel_format: crate::wayland::PixelFormat, pixel: &[u8]) -> [u8; 4]
+{
+	match image_pixel_format
 	{
-		match image_pixel_format
-		{
-			crate::wayland::PixelFormat::Argb8888 => [pixel[2], pixel[1], pixel[0], pixel[3]],
-			crate::wayland::PixelFormat::Xbgr8888 => [pixel[0], pixel[1], pixel[2], 255],
-			crate::wayland::PixelFormat::Xrgb8888 => [pixel[2], pixel[1], pixel[0], 255],
-		}
+		crate::wayland::PixelFormat::Argb8888 => [pixel[2], pixel[1], pixel[0], pixel[3]],
+		crate::wayland::PixelFormat::Xbgr8888 => [pixel[0], pixel[1], pixel[2], 255],
+		crate::wayland::PixelFormat::Xrgb8888 => [pixel[2], pixel[1], pixel[0], 255],
 	}
 }
 
@@ -444,18 +432,13 @@ mod tests
 
 		print_mmap(width, height, &input_mmap);
 
-		let output_capture = OutputCapture {
-			transform,
-			image_mmap: input_mmap,
-			image_mmap_size: crate::rectangle::Size::new(width as i32, height as i32),
-			// logical position and size should not affect this test
-			image_logical_position: crate::rectangle::Position::new(0, 0),
-			image_logical_size: crate::rectangle::Size::new(0, 0),
-			image_pixel_format: crate::wayland::PixelFormat::Xbgr8888,
-		};
-
 		// apply the transformation
-		let (width, height, result_mmap) = output_capture.get_transform_corrected_buffer();
+		let (width, height, result_mmap) = create_transform_corrected_buffer(
+			transform,
+			input_mmap,
+			crate::rectangle::Size::new(width as i32, height as i32),
+			crate::wayland::PixelFormat::Xbgr8888,
+		);
 
 		// the width and height should now match the expected result's
 		assert_eq!(width, expected_result.len());

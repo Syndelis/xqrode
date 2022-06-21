@@ -16,3 +16,5 @@ thiserror = "1.0.31"
 memmap2 = "0.5.4"
 clap = {version = "3.2.1", features = ["derive"]}
 mtpng = "0.3.5"
+resize = "0.7.3"
+rgb = "0.8.33"

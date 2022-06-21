@@ -1,6 +1,7 @@
 use std::{cmp, ffi, fs, os::unix::io::FromRawFd};
 
 use nix::sys::memfd;
+use rgb::FromSlice;
 use wayland_client::{
 	self,
 	protocol::{wl_buffer, wl_callback, wl_output, wl_registry, wl_shm, wl_shm_pool},
@@ -41,20 +42,13 @@ struct OutputInfo
 	image_ready: bool,
 }
 
-#[allow(clippy::from_over_into)]
-impl Into<crate::capture::OutputCapture> for OutputInfo
+#[derive(Debug)]
+struct OutputCapture
 {
-	fn into(self) -> crate::capture::OutputCapture
-	{
-		crate::capture::OutputCapture {
-			transform: self.transform.unwrap(),
-			image_mmap: self.image_mmap.unwrap(),
-			image_mmap_size: self.image_mmap_size.unwrap(),
-			image_logical_position: self.image_logical_position.unwrap(),
-			image_logical_size: self.image_logical_size.unwrap(),
-			image_pixel_format: self.image_pixel_format.unwrap(),
-		}
-	}
+	image_logical_position: rectangle::Position,
+	image_logical_size: rectangle::Size,
+	image_mmap: memmap2::MmapMut,
+	image_mmap_size: rectangle::Size,
 }
 
 struct State
@@ -679,9 +673,23 @@ fn captures_to_buffer(output_infos: Vec<OutputInfo>) -> CaptureReturn
 		return Err(crate::Error::NoCaptures);
 	}
 
-	let output_captures: Vec<crate::capture::OutputCapture> = output_infos
+	let output_captures: Vec<OutputCapture> = output_infos
 		.into_iter()
-		.map(|output_info| output_info.into())
+		.map(|output_info| {
+			let (mmap_width, mmap_height, image_mmap) = capture::create_transform_corrected_buffer(
+				output_info.transform.unwrap(),
+				output_info.image_mmap.unwrap(),
+				output_info.image_mmap_size.unwrap(),
+				output_info.image_pixel_format.unwrap(),
+			);
+
+			OutputCapture {
+				image_logical_position: output_info.logical_position.unwrap(),
+				image_logical_size: output_info.image_logical_size.unwrap(),
+				image_mmap,
+				image_mmap_size: rectangle::Size::new(mmap_width as i32, mmap_height as i32),
+			}
+		})
 		.collect();
 
 	let mut upper_left = output_captures[0].image_logical_position;
@@ -715,14 +723,44 @@ fn captures_to_buffer(output_infos: Vec<OutputInfo>) -> CaptureReturn
 
 	for output_capture in output_captures.into_iter()
 	{
+		println!("{:?}", output_capture);
+
+		let mut destination = vec![
+			rgb::RGBA::<u8>::new(0, 0, 0, 0);
+			output_capture.image_logical_size.width as usize
+				* output_capture.image_logical_size.height as usize
+		];
+
+		let image_buffer = if output_capture.image_mmap_size.width
+			!= output_capture.image_logical_size.width
+			|| output_capture.image_mmap_size.height != output_capture.image_logical_size.height
+		{
+			let mut resizer = resize::Resizer::new(
+				output_capture.image_mmap_size.width as usize,
+				output_capture.image_mmap_size.height as usize,
+				output_capture.image_logical_size.width as usize,
+				output_capture.image_logical_size.height as usize,
+				resize::Pixel::RGBA8,
+				resize::Type::Lanczos3,
+			)
+			.unwrap();
+
+			resizer
+				.resize(output_capture.image_mmap.as_rgba(), &mut destination)
+				.unwrap();
+
+			destination.as_slice()
+		}
+		else
+		{
+			&output_capture.image_mmap.as_rgba()[..]
+		};
+
 		let position_offset = output_capture.image_logical_position - upper_left;
 
-		let (width, height, output_capture_buffer) =
-			output_capture.get_transform_corrected_buffer();
-
-		for y in 0..height
+		for y in 0..output_capture.image_logical_size.height
 		{
-			for x in 0..width
+			for x in 0..output_capture.image_logical_size.width
 			{
 				// convert to absolute coordinates
 				// let position = rectangle::Position {
@@ -730,15 +768,19 @@ fn captures_to_buffer(output_infos: Vec<OutputInfo>) -> CaptureReturn
 				// 	y: y + output_capture.image_logical_position.y,
 				// };
 
-				let output_capture_index = ((y * width) + x) * 4;
+				let output_capture_index = ((y * output_capture.image_logical_size.width) + x);
 
-				let index = ((position_offset.y as usize + y) * (size.width as usize * 4))
-					+ ((position_offset.x as usize + x) * 4);
+				let output_capture_index = output_capture_index as usize;
 
-				buffer[index] = output_capture_buffer[output_capture_index];
-				buffer[index + 1] = output_capture_buffer[output_capture_index + 1];
-				buffer[index + 2] = output_capture_buffer[output_capture_index + 2];
-				buffer[index + 3] = output_capture_buffer[output_capture_index + 3];
+				let index =
+					((position_offset.y + y) * (size.width * 4)) + ((position_offset.x + x) * 4);
+
+				let index = index as usize;
+
+				buffer[index] = image_buffer[output_capture_index].r;
+				buffer[index + 1] = image_buffer[output_capture_index].g;
+				buffer[index + 2] = image_buffer[output_capture_index].b;
+				buffer[index + 3] = image_buffer[output_capture_index].a;
 			}
 		}
 	}
