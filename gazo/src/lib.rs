@@ -1,6 +1,5 @@
 //! Gazo is a crate to capture screen pixel data on Wayland compositors
-//! implementing the wlr_screencopy protocol. All coordinates in this crate are
-//! absolute in the logical compositor coordinate space.
+//! implementing the wlr_screencopy protocol.
 
 #![deny(missing_docs)]
 #![feature(type_alias_impl_trait)]

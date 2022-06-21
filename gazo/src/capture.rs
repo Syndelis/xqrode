@@ -108,6 +108,8 @@ fn transform_pixel(image_pixel_format: crate::wayland::PixelFormat, pixel: &[u8]
 }
 
 // TODO test pixel format adjustments
+// TODO add even_row_column_square transformation test
+// TODO add non-square transformation tests
 #[cfg(test)]
 mod tests
 {
@@ -408,11 +410,6 @@ mod tests
 			],
 			expected_result.clone(),
 		);
-	}
-
-	#[test]
-	fn test_transformation_even_square()
-	{
 	}
 
 	// instantiates struct and uses given arguments to test

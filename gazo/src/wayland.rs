@@ -196,7 +196,6 @@ impl Dispatch<wl_output::WlOutput, usize> for State
 			wl_output::Event::Scale { factor } =>
 			{
 				self.output_infos[*index].scale_factor = factor;
-				println!("Scale factor: {}", factor);
 			}
 			_ =>
 			{}
@@ -274,8 +273,6 @@ impl Dispatch<zwlr_screencopy_frame_v1::ZwlrScreencopyFrameV1, usize> for State
 					width: width as i32,
 					height: height as i32,
 				});
-
-				println!("buffer size: {}x{}", width, height);
 
 				// allocate memory with a file descriptor
 				let raw_fd = memfd::memfd_create(
@@ -589,8 +586,6 @@ pub fn capture_region(
 				output_info.image_logical_position = Some(rectangle.position);
 				output_info.image_logical_size = Some(rectangle.size);
 
-				println!("{:?}", rectangle);
-
 				true
 			}
 			None => false,
@@ -677,8 +672,6 @@ fn captures_to_buffer(output_infos: Vec<OutputInfo>) -> CaptureReturn
 		return Err(crate::Error::NoCaptures);
 	}
 
-	println!("{:?}", output_infos);
-
 	let output_captures: Vec<OutputCapture> = output_infos
 		.into_iter()
 		.map(|output_info| {
@@ -697,8 +690,6 @@ fn captures_to_buffer(output_infos: Vec<OutputInfo>) -> CaptureReturn
 			}
 		})
 		.collect();
-
-	println!("{:?}", output_captures);
 
 	let mut upper_left = output_captures[0].image_logical_position;
 	let mut bottom_right = upper_left + output_captures[0].image_logical_size;
@@ -720,8 +711,6 @@ fn captures_to_buffer(output_infos: Vec<OutputInfo>) -> CaptureReturn
 		);
 	}
 
-	println!("upleft: {:?}, boright: {:?}", upper_left, bottom_right);
-
 	let size = rectangle::Size {
 		width: bottom_right.x - upper_left.x,
 		height: bottom_right.y - upper_left.y,
@@ -729,12 +718,8 @@ fn captures_to_buffer(output_infos: Vec<OutputInfo>) -> CaptureReturn
 
 	let mut buffer: Vec<u8> = vec![0; size.width as usize * size.height as usize * 4];
 
-	let time = std::time::Instant::now();
-
 	for output_capture in output_captures.into_iter()
 	{
-		println!("{:?}", output_capture);
-
 		let mut destination = vec![
 			rgb::RGBA::<u8>::new(0, 0, 0, 0);
 			output_capture.image_logical_size.width as usize
@@ -772,12 +757,6 @@ fn captures_to_buffer(output_infos: Vec<OutputInfo>) -> CaptureReturn
 		{
 			for x in 0..output_capture.image_logical_size.width
 			{
-				// convert to absolute coordinates
-				// let position = rectangle::Position {
-				// 	x: x + output_capture.image_logical_position.x,
-				// 	y: y + output_capture.image_logical_position.y,
-				// };
-
 				let output_capture_index = (y * output_capture.image_logical_size.width) + x;
 
 				let output_capture_index = output_capture_index as usize;
@@ -794,8 +773,6 @@ fn captures_to_buffer(output_infos: Vec<OutputInfo>) -> CaptureReturn
 			}
 		}
 	}
-
-	println!("{:?}", time.elapsed());
 
 	Ok((size.width as u32, size.height as u32, buffer))
 }
