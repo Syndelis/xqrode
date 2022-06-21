@@ -17,7 +17,7 @@ use crate::{capture, rectangle};
 // all coordinates in this crate are absolute in the compositor coordinate space
 // unless otherwise specified as local
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub(crate) enum PixelFormat
 {
 	Argb8888,
@@ -25,12 +25,13 @@ pub(crate) enum PixelFormat
 	Xbgr8888,
 }
 
+#[derive(Debug)]
 struct OutputInfo
 {
 	wl_output: wl_output::WlOutput,
 	name: Option<String>,
-	logical_position: Option<rectangle::Position>,
-	logical_size: Option<rectangle::Size>,
+	output_logical_position: Option<rectangle::Position>,
+	output_logical_size: Option<rectangle::Size>,
 	transform: Option<wl_output::Transform>,
 	scale_factor: i32,
 	image_file: Option<fs::File>,
@@ -131,8 +132,8 @@ impl Dispatch<wl_registry::WlRegistry, ()> for State
 					self.output_infos.push(OutputInfo {
 						wl_output,
 						name: None,
-						logical_position: None,
-						logical_size: None,
+						output_logical_position: None,
+						output_logical_size: None,
 						transform: None,
 						scale_factor: 1,
 						image_file: None,
@@ -220,12 +221,14 @@ impl Dispatch<zxdg_output_v1::ZxdgOutputV1, usize> for State
 			// logical position is the position in the compositor space accounting for transforms
 			zxdg_output_v1::Event::LogicalPosition { x, y } =>
 			{
-				self.output_infos[*index].logical_position = Some(rectangle::Position { x, y });
+				self.output_infos[*index].output_logical_position =
+					Some(rectangle::Position { x, y });
 			}
 			// like logical position but for size
 			zxdg_output_v1::Event::LogicalSize { width, height } =>
 			{
-				self.output_infos[*index].logical_size = Some(rectangle::Size { width, height });
+				self.output_infos[*index].output_logical_size =
+					Some(rectangle::Size { width, height });
 			}
 			_ =>
 			{}
@@ -454,8 +457,8 @@ fn connect_and_get_output_info() -> Result<(State, wayland_client::EventQueue<St
 
 	// run until all information about the outputs has been sent
 	while state.output_infos.iter().any(|output_info| {
-		output_info.logical_position.is_none()
-			|| output_info.logical_size.is_none()
+		output_info.output_logical_position.is_none()
+			|| output_info.output_logical_size.is_none()
 			|| output_info.transform.is_none()
 	})
 	{
@@ -476,10 +479,8 @@ pub fn capture_all_outputs(include_cursor: bool) -> CaptureReturn
 
 	for (i, output_info) in state.output_infos.iter_mut().enumerate()
 	{
-		output_info.image_logical_position = output_info.logical_position;
-		output_info.image_logical_size = output_info.logical_size;
-
-		println!("logical size: {:?}", output_info.logical_size);
+		output_info.image_logical_position = output_info.output_logical_position;
+		output_info.image_logical_size = output_info.output_logical_size;
 
 		// TODO: do not unwrap
 		state
@@ -535,7 +536,7 @@ pub fn capture_output(name: &str, include_cursor: bool) -> CaptureReturn
 	}
 
 	state.output_infos[0].image_logical_position = Some(rectangle::Position { x: 0, y: 0 });
-	state.output_infos[0].image_logical_size = state.output_infos[0].logical_size;
+	state.output_infos[0].image_logical_size = state.output_infos[0].output_logical_size;
 
 	state
 		.wlr_screencopy_manager
@@ -578,8 +579,8 @@ pub fn capture_region(
 	state.output_infos.retain_mut(|output_info| {
 		// determine the region of the output that is selected
 		match rectangle::Rectangle::new(
-			output_info.logical_position.unwrap(),
-			output_info.logical_size.unwrap(),
+			output_info.output_logical_position.unwrap(),
+			output_info.output_logical_size.unwrap(),
 		)
 		.get_intersection(region_rectangle)
 		{
@@ -587,6 +588,8 @@ pub fn capture_region(
 			{
 				output_info.image_logical_position = Some(rectangle.position);
 				output_info.image_logical_size = Some(rectangle.size);
+
+				println!("{:?}", rectangle);
 
 				true
 			}
@@ -601,7 +604,8 @@ pub fn capture_region(
 		let image_size = output_info.image_logical_size.unwrap();
 
 		// adjust position to local output coordinates
-		let mut image_position_local = image_position - output_info.logical_position.unwrap();
+		let mut image_position_local =
+			image_position - output_info.output_logical_position.unwrap();
 
 		match output_info.transform.as_ref().unwrap()
 		{
@@ -625,7 +629,7 @@ pub fn capture_region(
 				image_position_local = rectangle::Position {
 					x: -image_position_local.x,
 					y: -image_position_local.y,
-				} + (output_info.logical_size.unwrap() - image_size);
+				} + (output_info.output_logical_size.unwrap() - image_size);
 			}
 			_ =>
 			{
@@ -673,6 +677,8 @@ fn captures_to_buffer(output_infos: Vec<OutputInfo>) -> CaptureReturn
 		return Err(crate::Error::NoCaptures);
 	}
 
+	println!("{:?}", output_infos);
+
 	let output_captures: Vec<OutputCapture> = output_infos
 		.into_iter()
 		.map(|output_info| {
@@ -684,13 +690,15 @@ fn captures_to_buffer(output_infos: Vec<OutputInfo>) -> CaptureReturn
 			);
 
 			OutputCapture {
-				image_logical_position: output_info.logical_position.unwrap(),
+				image_logical_position: output_info.image_logical_position.unwrap(),
 				image_logical_size: output_info.image_logical_size.unwrap(),
 				image_mmap,
 				image_mmap_size: rectangle::Size::new(mmap_width as i32, mmap_height as i32),
 			}
 		})
 		.collect();
+
+	println!("{:?}", output_captures);
 
 	let mut upper_left = output_captures[0].image_logical_position;
 	let mut bottom_right = upper_left + output_captures[0].image_logical_size;
@@ -711,6 +719,8 @@ fn captures_to_buffer(output_infos: Vec<OutputInfo>) -> CaptureReturn
 			bottom_right.y,
 		);
 	}
+
+	println!("upleft: {:?}, boright: {:?}", upper_left, bottom_right);
 
 	let size = rectangle::Size {
 		width: bottom_right.x - upper_left.x,
@@ -768,7 +778,7 @@ fn captures_to_buffer(output_infos: Vec<OutputInfo>) -> CaptureReturn
 				// 	y: y + output_capture.image_logical_position.y,
 				// };
 
-				let output_capture_index = ((y * output_capture.image_logical_size.width) + x);
+				let output_capture_index = (y * output_capture.image_logical_size.width) + x;
 
 				let output_capture_index = output_capture_index as usize;
 
