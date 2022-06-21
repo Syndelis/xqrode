@@ -4,7 +4,7 @@ pub(crate) fn create_transform_corrected_buffer(
 	transform: wl_output::Transform,
 	image_mmap: memmap2::MmapMut,
 	image_mmap_size: crate::rectangle::Size,
-	image_pixel_format: crate::wayland::PixelFormat,
+	image_pixel_format: crate::PixelFormat,
 ) -> (usize, usize, memmap2::MmapMut)
 {
 	let mut mmap = memmap2::MmapMut::map_anon(
@@ -97,13 +97,13 @@ pub(crate) fn create_transform_corrected_buffer(
 }
 
 // turn image pixel format into Rgba8888
-fn transform_pixel(image_pixel_format: crate::wayland::PixelFormat, pixel: &[u8]) -> [u8; 4]
+fn transform_pixel(image_pixel_format: crate::PixelFormat, pixel: &[u8]) -> [u8; 4]
 {
 	match image_pixel_format
 	{
-		crate::wayland::PixelFormat::Argb8888 => [pixel[2], pixel[1], pixel[0], pixel[3]],
-		crate::wayland::PixelFormat::Xbgr8888 => [pixel[0], pixel[1], pixel[2], 255],
-		crate::wayland::PixelFormat::Xrgb8888 => [pixel[2], pixel[1], pixel[0], 255],
+		crate::PixelFormat::Argb8888 => [pixel[2], pixel[1], pixel[0], pixel[3]],
+		crate::PixelFormat::Xbgr8888 => [pixel[0], pixel[1], pixel[2], 255],
+		crate::PixelFormat::Xrgb8888 => [pixel[2], pixel[1], pixel[0], 255],
 	}
 }
 
@@ -434,7 +434,7 @@ mod tests
 			transform,
 			input_mmap,
 			crate::rectangle::Size::new(width as i32, height as i32),
-			crate::wayland::PixelFormat::Xbgr8888,
+			crate::PixelFormat::Xbgr8888,
 		);
 
 		// the width and height should now match the expected result's

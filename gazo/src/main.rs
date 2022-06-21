@@ -1,6 +1,6 @@
 use std::{fs, path::PathBuf};
 
-use clap::{ArgEnum, Parser};
+use clap::Parser;
 use regex::Regex;
 
 #[derive(clap::Parser)]
@@ -29,7 +29,7 @@ fn main()
 {
 	let cli = Cli::parse();
 
-	let (width, height, image_buffer) = match if cli.geometry.is_some()
+	let capture = match if cli.geometry.is_some()
 	{
 		// TODO parse geometry using clap
 		let re = Regex::new(r"(-?\d+),(-?\d+) (\d+)x(\d+)").unwrap();
@@ -72,14 +72,16 @@ fn main()
 
 	let mut header = mtpng::Header::new();
 
-	header.set_size(width as u32, height as u32).unwrap();
+	header
+		.set_size(capture.width as u32, capture.height as u32)
+		.unwrap();
 	header
 		.set_color(mtpng::ColorType::TruecolorAlpha, 8)
 		.unwrap();
 
 	encoder.write_header(&header).unwrap();
 
-	encoder.write_image_rows(&image_buffer).unwrap();
+	encoder.write_image_rows(&capture.pixel_data).unwrap();
 
 	encoder.flush().unwrap();
 }
