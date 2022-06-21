@@ -11,13 +11,13 @@ use wayland_protocols_wlr::screencopy::v1::client::{
 	zwlr_screencopy_frame_v1, zwlr_screencopy_manager_v1,
 };
 
-use crate::rectangle;
+use crate::{capture, rectangle};
 
 // all coordinates in this crate are absolute in the compositor coordinate space
 // unless otherwise specified as local
 
 #[derive(Clone, Copy)]
-enum PixelFormat
+pub(crate) enum PixelFormat
 {
 	Argb8888,
 	Xrgb8888,
@@ -33,110 +33,26 @@ struct OutputInfo
 	transform: Option<wl_output::Transform>,
 	scale_factor: i32,
 	image_file: Option<fs::File>,
-	image_mmap: Option<memmap2::Mmap>,
-	image_position: Option<rectangle::Position>,
-	image_size: Option<rectangle::Size>,
+	image_mmap: Option<memmap2::MmapMut>,
+	image_mmap_size: Option<rectangle::Size>,
+	image_logical_position: Option<rectangle::Position>,
+	image_logical_size: Option<rectangle::Size>,
 	image_pixel_format: Option<PixelFormat>,
 	image_ready: bool,
 }
 
 #[allow(clippy::from_over_into)]
-impl Into<OutputCapture> for OutputInfo
+impl Into<crate::capture::OutputCapture> for OutputInfo
 {
-	fn into(self) -> OutputCapture
+	fn into(self) -> crate::capture::OutputCapture
 	{
-		OutputCapture {
+		crate::capture::OutputCapture {
 			transform: self.transform.unwrap(),
 			image_mmap: self.image_mmap.unwrap(),
-			image_position: self.image_position.unwrap(),
-			image_size: self.image_size.unwrap(),
+			image_mmap_size: self.image_mmap_size.unwrap(),
+			image_logical_position: self.image_logical_position.unwrap(),
+			image_logical_size: self.image_logical_size.unwrap(),
 			image_pixel_format: self.image_pixel_format.unwrap(),
-		}
-	}
-}
-
-struct OutputCapture
-{
-	transform: wl_output::Transform,
-	image_mmap: memmap2::Mmap,
-	image_position: rectangle::Position,
-	image_size: rectangle::Size,
-	image_pixel_format: PixelFormat,
-}
-
-impl OutputCapture
-{
-	// TODO: handle scaling
-	fn get_image_pixel(&self, position: rectangle::Position) -> [u8; 4]
-	{
-		// convert to output local coordinate
-		let (x, y) = (
-			position.x - self.image_position.x,
-			position.y - self.image_position.y,
-		);
-
-		let image_size = self.image_size;
-
-		// transforms output local coordinate into index based on the output transform
-		let index = match self.transform
-		{
-			wl_output::Transform::Normal => (x + (y * self.image_size.width)) * 4,
-			wl_output::Transform::_90 => (((image_size.width - x - 1) * image_size.height) + y) * 4,
-			wl_output::Transform::_180 =>
-			{
-				((image_size.width - x - 1) + ((image_size.height - y - 1) * image_size.width)) * 4
-			}
-			wl_output::Transform::_270 =>
-			{
-				((x * image_size.height) + (image_size.height - y - 1)) * 4
-			}
-			wl_output::Transform::Flipped =>
-			{
-				((image_size.width - x - 1) + (y * image_size.width)) * 4
-			}
-			wl_output::Transform::Flipped90 => ((x * image_size.height) + y) * 4,
-			wl_output::Transform::Flipped180 =>
-			{
-				(x + ((image_size.height - y - 1) * image_size.width)) * 4
-			}
-			wl_output::Transform::Flipped270 =>
-			{
-				(((image_size.width - x - 1) * image_size.height) + (image_size.height - y - 1)) * 4
-			}
-			_ => panic!("AHHHH"),
-		};
-
-		let index = index as usize;
-
-		match self.image_pixel_format
-		{
-			PixelFormat::Argb8888 =>
-			{
-				[
-					self.image_mmap[index + 2],
-					self.image_mmap[index + 1],
-					self.image_mmap[index],
-					self.image_mmap[index + 3],
-				]
-			}
-			PixelFormat::Xbgr8888 =>
-			{
-				[
-					self.image_mmap[index],
-					self.image_mmap[index + 1],
-					self.image_mmap[index + 2],
-					255,
-				]
-			}
-			PixelFormat::Xrgb8888 =>
-			{
-				[
-					self.image_mmap[index + 2],
-					self.image_mmap[index + 1],
-					self.image_mmap[index],
-					255,
-				]
-			}
 		}
 	}
 }
@@ -227,8 +143,9 @@ impl Dispatch<wl_registry::WlRegistry, ()> for State
 						scale_factor: 1,
 						image_file: None,
 						image_mmap: None,
-						image_position: None,
-						image_size: None,
+						image_mmap_size: None,
+						image_logical_position: None,
+						image_logical_size: None,
 						image_pixel_format: None,
 						image_ready: false,
 					});
@@ -356,6 +273,13 @@ impl Dispatch<zwlr_screencopy_frame_v1::ZwlrScreencopyFrameV1, usize> for State
 					_ => return,
 				};
 
+				self.output_infos[*index].image_mmap_size = Some(rectangle::Size {
+					width: width as i32,
+					height: height as i32,
+				});
+
+				println!("buffer size: {}x{}", width, height);
+
 				// allocate memory with a file descriptor
 				let raw_fd = memfd::memfd_create(
 					ffi::CStr::from_bytes_with_nul(b"gato\0").unwrap(),
@@ -407,8 +331,10 @@ impl Dispatch<zwlr_screencopy_frame_v1::ZwlrScreencopyFrameV1, usize> for State
 			{
 				// create an mmap
 				self.output_infos[*index].image_mmap = Some(unsafe {
-					memmap2::Mmap::map(self.output_infos[*index].image_file.as_ref().unwrap())
-						.expect("Failed to create memory mapping")
+					memmap2::MmapMut::map_mut(
+						self.output_infos[*index].image_file.as_ref().unwrap(),
+					)
+					.expect("Failed to create memory mapping")
 				});
 
 				// mark image as ready
@@ -556,8 +482,10 @@ pub fn capture_all_outputs(include_cursor: bool) -> CaptureReturn
 
 	for (i, output_info) in state.output_infos.iter_mut().enumerate()
 	{
-		output_info.image_position = output_info.logical_position;
-		output_info.image_size = output_info.logical_size;
+		output_info.image_logical_position = output_info.logical_position;
+		output_info.image_logical_size = output_info.logical_size;
+
+		println!("logical size: {:?}", output_info.logical_size);
 
 		// TODO: do not unwrap
 		state
@@ -612,8 +540,8 @@ pub fn capture_output(name: &str, include_cursor: bool) -> CaptureReturn
 		return Err(crate::Error::NoOutput(name.to_owned()));
 	}
 
-	state.output_infos[0].image_position = Some(rectangle::Position { x: 0, y: 0 });
-	state.output_infos[0].image_size = state.output_infos[0].logical_size;
+	state.output_infos[0].image_logical_position = Some(rectangle::Position { x: 0, y: 0 });
+	state.output_infos[0].image_logical_size = state.output_infos[0].logical_size;
 
 	state
 		.wlr_screencopy_manager
@@ -663,8 +591,8 @@ pub fn capture_region(
 		{
 			Some(rectangle) =>
 			{
-				output_info.image_position = Some(rectangle.position);
-				output_info.image_size = Some(rectangle.size);
+				output_info.image_logical_position = Some(rectangle.position);
+				output_info.image_logical_size = Some(rectangle.size);
 
 				true
 			}
@@ -675,8 +603,8 @@ pub fn capture_region(
 	// request capture of screen
 	for (i, output_info) in state.output_infos.iter_mut().enumerate()
 	{
-		let image_position = output_info.image_position.unwrap();
-		let image_size = output_info.image_size.unwrap();
+		let image_position = output_info.image_logical_position.unwrap();
+		let image_size = output_info.image_logical_size.unwrap();
 
 		// adjust position to local output coordinates
 		let mut image_position_local = image_position - output_info.logical_position.unwrap();
@@ -751,27 +679,27 @@ fn captures_to_buffer(output_infos: Vec<OutputInfo>) -> CaptureReturn
 		return Err(crate::Error::NoCaptures);
 	}
 
-	let output_captures: Vec<OutputCapture> = output_infos
+	let output_captures: Vec<crate::capture::OutputCapture> = output_infos
 		.into_iter()
 		.map(|output_info| output_info.into())
 		.collect();
 
-	let mut upper_left = output_captures[0].image_position;
-	let mut bottom_right = upper_left + output_captures[0].image_size;
+	let mut upper_left = output_captures[0].image_logical_position;
+	let mut bottom_right = upper_left + output_captures[0].image_logical_size;
 
 	for capture in &output_captures[1..]
 	{
-		upper_left.x = cmp::min(capture.image_position.x, upper_left.x);
+		upper_left.x = cmp::min(capture.image_logical_position.x, upper_left.x);
 
-		upper_left.y = cmp::min(capture.image_position.y, upper_left.y);
+		upper_left.y = cmp::min(capture.image_logical_position.y, upper_left.y);
 
 		bottom_right.x = cmp::max(
-			capture.image_position.x + capture.image_size.width,
+			capture.image_logical_position.x + capture.image_logical_size.width,
 			bottom_right.x,
 		);
 
 		bottom_right.y = cmp::max(
-			capture.image_position.y + capture.image_size.height,
+			capture.image_logical_position.y + capture.image_logical_size.height,
 			bottom_right.y,
 		);
 	}
@@ -785,31 +713,32 @@ fn captures_to_buffer(output_infos: Vec<OutputInfo>) -> CaptureReturn
 
 	let time = std::time::Instant::now();
 
-	for output_capture in &output_captures
+	for output_capture in output_captures.into_iter()
 	{
-		let position_offset = output_capture.image_position - upper_left;
+		let position_offset = output_capture.image_logical_position - upper_left;
 
-		for y in 0..output_capture.image_size.height
+		let (width, height, output_capture_buffer) =
+			output_capture.get_transform_corrected_buffer();
+
+		for y in 0..height
 		{
-			for x in 0..output_capture.image_size.width
+			for x in 0..width
 			{
 				// convert to absolute coordinates
-				let position = rectangle::Position {
-					x: x + output_capture.image_position.x,
-					y: y + output_capture.image_position.y,
-				};
+				// let position = rectangle::Position {
+				// 	x: x + output_capture.image_logical_position.x,
+				// 	y: y + output_capture.image_logical_position.y,
+				// };
 
-				let pixel = output_capture.get_image_pixel(position);
+				let output_capture_index = ((y * width) + x) * 4;
 
-				let index =
-					((position_offset.y + y) * (size.width * 4)) + ((position_offset.x + x) * 4);
+				let index = ((position_offset.y as usize + y) * (size.width as usize * 4))
+					+ ((position_offset.x as usize + x) * 4);
 
-				let index = index as usize;
-
-				buffer[index] = pixel[0];
-				buffer[index + 1] = pixel[1];
-				buffer[index + 2] = pixel[2];
-				buffer[index + 3] = pixel[3];
+				buffer[index] = output_capture_buffer[output_capture_index];
+				buffer[index + 1] = output_capture_buffer[output_capture_index + 1];
+				buffer[index + 2] = output_capture_buffer[output_capture_index + 2];
+				buffer[index + 3] = output_capture_buffer[output_capture_index + 3];
 			}
 		}
 	}

@@ -5,6 +5,7 @@
 #![deny(missing_docs)]
 #![feature(type_alias_impl_trait)]
 
+mod capture;
 mod rectangle;
 mod wayland;
 

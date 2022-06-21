@@ -3,13 +3,6 @@ use std::{fs, path::PathBuf};
 use clap::{ArgEnum, Parser};
 use regex::Regex;
 
-#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ArgEnum)]
-enum ImageType
-{
-	Png,
-	Jpeg,
-}
-
 #[derive(clap::Parser)]
 #[clap(name = "gazo")]
 #[clap(author = "redArch <redarch@protonmail.com>")]
