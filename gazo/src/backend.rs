@@ -212,13 +212,13 @@ impl Dispatch<zxdg_output_v1::ZxdgOutputV1, usize> for State
 			zxdg_output_v1::Event::LogicalPosition { x, y } =>
 			{
 				self.output_infos[*index].output_logical_position =
-					Some(rectangle::Position { x, y });
+					Some(rectangle::Position::new(x, y));
 			}
 			// like logical position but for size
 			zxdg_output_v1::Event::LogicalSize { width, height } =>
 			{
 				self.output_infos[*index].output_logical_size =
-					Some(rectangle::Size { width, height });
+					Some(rectangle::Size::new(width, height));
 			}
 			_ =>
 			{}
@@ -260,10 +260,8 @@ impl Dispatch<zwlr_screencopy_frame_v1::ZwlrScreencopyFrameV1, usize> for State
 					_ => return,
 				};
 
-				self.output_infos[*index].image_mmap_size = Some(rectangle::Size {
-					width: width as i32,
-					height: height as i32,
-				});
+				self.output_infos[*index].image_mmap_size =
+					Some(rectangle::Size::new(width as i32, height as i32));
 
 				// allocate memory with a file descriptor
 				let raw_fd = memfd::memfd_create(

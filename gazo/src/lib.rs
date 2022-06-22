@@ -64,10 +64,13 @@ pub fn capture_all_outputs(include_cursor: bool) -> CaptureReturn
 
 	for (i, output_info) in state.output_infos.iter_mut().enumerate()
 	{
+		// the image logical position and size will be the same as the output logical
+		// position and size
 		output_info.image_logical_position = output_info.output_logical_position;
 		output_info.image_logical_size = output_info.output_logical_size;
 
-		// TODO: do not unwrap
+		// this only returns an error when the object ID is invalid, which it should not
+		// be at this point
 		state
 			.wlr_screencopy_manager
 			.as_ref()
@@ -209,10 +212,12 @@ pub fn capture_region(
 			{
 				// transforms position so it starts at the logical top left
 				// this transform causes (0, 0) to be at the bottom right of the monitor
-				image_position_local = rectangle::Position {
-					x: -image_position_local.x,
-					y: -image_position_local.y,
-				} + (output_info.output_logical_size.unwrap() - image_size);
+				image_position_local = rectangle::Position::new(
+					-image_position_local.x + output_info.output_logical_size.unwrap().width
+						- image_size.width,
+					-image_position_local.y + output_info.output_logical_size.unwrap().height
+						- image_size.height,
+				);
 			}
 			_ =>
 			{
@@ -231,8 +236,8 @@ pub fn capture_region(
 			.capture_output_region(
 				include_cursor as i32,
 				&output_info.wl_output,
-				image_position_local.x,
-				image_position_local.y,
+				image_position_local.x as i32,
+				image_position_local.y as i32,
 				image_size.width,
 				image_size.height,
 				&event_queue.handle(),
@@ -280,7 +285,10 @@ fn captures_to_buffer(output_infos: Vec<backend::OutputInfo>) -> CaptureReturn
 		.collect();
 
 	let mut upper_left = output_captures[0].image_logical_position;
-	let mut bottom_right = upper_left + output_captures[0].image_logical_size;
+	let mut bottom_right = rectangle::Position::new(
+		upper_left.x + output_captures[0].image_logical_size.width,
+		upper_left.y + output_captures[0].image_logical_size.height,
+	);
 
 	for capture in &output_captures[1..]
 	{
@@ -336,7 +344,7 @@ fn captures_to_buffer(output_infos: Vec<backend::OutputInfo>) -> CaptureReturn
 		}
 		else
 		{
-			&output_capture.image_mmap.as_rgba()[..]
+			output_capture.image_mmap.as_rgba()
 		};
 
 		let position_offset = output_capture.image_logical_position - upper_left;

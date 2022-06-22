@@ -409,7 +409,7 @@ mod tests
 					[24, 24, 24, 255],
 				],
 			],
-			expected_result.clone(),
+			expected_result,
 		);
 	}
 

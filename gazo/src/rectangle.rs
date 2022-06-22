@@ -48,48 +48,11 @@ pub struct Size
 	pub height: i32,
 }
 
-impl From<(i32, i32)> for Size
-{
-	fn from(item: (i32, i32)) -> Self
-	{
-		Self {
-			width: item.0,
-			height: item.1,
-		}
-	}
-}
-
 impl Size
 {
 	pub fn new(width: i32, height: i32) -> Self
 	{
 		Size { width, height }
-	}
-}
-
-impl Add<Size> for Position
-{
-	type Output = Self;
-
-	fn add(self, rhs: Size) -> Self::Output
-	{
-		Position {
-			x: self.x + rhs.width,
-			y: self.y + rhs.height,
-		}
-	}
-}
-
-impl Sub<Size> for Position
-{
-	type Output = Self;
-
-	fn sub(self, rhs: Size) -> Self::Output
-	{
-		Position {
-			x: self.x - rhs.width,
-			y: self.y - rhs.height,
-		}
 	}
 }
 
