@@ -24,19 +24,19 @@ fn main()
 		captures.get(4).unwrap().as_str().parse::<i32>().unwrap(),
 	);
 
-	let (width, height, image_buffer) = gazo::capture_region(position, size, false).unwrap();
+	let capture = gazo::capture_region(position, size, false).unwrap();
 
 	let mut prepared_image = rqrr::PreparedImage::prepare_from_greyscale(
-		width as usize,
-		height as usize,
+		capture.width as usize,
+		capture.height as usize,
 		move |x, y| {
-			let index = (y * width as usize * 4) + (x * 4) as usize;
+			let index = (y * capture.width * 4) + (x * 4);
 
 			// average the rgb values for grayscale value
 			// must be divided individually
-			(image_buffer[index] / 3)
-				+ (image_buffer[index + 1] / 3)
-				+ (image_buffer[index + 2] / 3)
+			(capture.pixel_data[index] / 3)
+				+ (capture.pixel_data[index + 1] / 3)
+				+ (capture.pixel_data[index + 2] / 3)
 		},
 	);
 
