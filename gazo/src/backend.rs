@@ -30,7 +30,7 @@ pub(crate) struct OutputInfo
 	pub image_mmap_size: Option<rectangle::Size>,
 	pub image_logical_position: Option<rectangle::Position>,
 	pub image_logical_size: Option<rectangle::Size>,
-	pub image_pixel_format: Option<crate::PixelFormat>,
+	pub image_pixel_format: Option<wl_shm::Format>,
 	pub image_ready: bool,
 }
 
@@ -254,9 +254,9 @@ impl Dispatch<zwlr_screencopy_frame_v1::ZwlrScreencopyFrameV1, usize> for State
 				// check for valid format
 				self.output_infos[*index].image_pixel_format = match format
 				{
-					wl_shm::Format::Argb8888 => Some(crate::PixelFormat::Argb8888),
-					wl_shm::Format::Xrgb8888 => Some(crate::PixelFormat::Xrgb8888),
-					wl_shm::Format::Xbgr8888 => Some(crate::PixelFormat::Xbgr8888),
+					wl_shm::Format::Argb8888
+					| wl_shm::Format::Xrgb8888
+					| wl_shm::Format::Xbgr8888 => Some(format),
 					_ => return,
 				};
 

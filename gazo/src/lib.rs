@@ -12,14 +12,6 @@ mod backend;
 mod capture;
 mod rectangle;
 
-#[derive(Clone, Copy, Debug)]
-pub(crate) enum PixelFormat
-{
-	Argb8888,
-	Xrgb8888,
-	Xbgr8888,
-}
-
 /// Enum representing potential errors.
 #[derive(thiserror::Error, Debug)]
 pub enum Error
