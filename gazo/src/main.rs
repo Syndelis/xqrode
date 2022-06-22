@@ -1,6 +1,7 @@
 use std::{fs, path::PathBuf};
 
 use clap::Parser;
+use gazo::ComponentBytes;
 use regex::Regex;
 
 #[derive(clap::Parser)]
@@ -81,7 +82,9 @@ fn main()
 
 	encoder.write_header(&header).unwrap();
 
-	encoder.write_image_rows(&capture.pixel_data).unwrap();
+	encoder
+		.write_image_rows(capture.pixel_data.as_bytes())
+		.unwrap();
 
 	encoder.flush().unwrap();
 }

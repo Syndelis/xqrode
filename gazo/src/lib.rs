@@ -1,10 +1,11 @@
 //! Gazo is a crate to capture screen pixel data on Wayland compositors
-//! implementing the wlr_screencopy protocol.
+//! that implement the wlr_screencopy protocol, like <a href = "https://github.com/swaywm/sway" target = "_blank">sway</a>.
 
 #![deny(missing_docs)]
 
 use std::cmp;
 
+pub use rgb::ComponentBytes;
 use rgb::FromSlice;
 use wayland_client::protocol::wl_output;
 
@@ -16,7 +17,7 @@ mod transform;
 #[derive(thiserror::Error, Debug)]
 pub enum Error
 {
-	/// This error will only be returned by [`capture_output`] when the given
+	/// This error will be returned by [`capture_output`] when the given
 	/// output name does not match any outputs listed by the compositor.
 	#[error("output \"{0}\" was not found")]
 	NoOutput(String),
@@ -33,16 +34,17 @@ pub enum Error
 	/// an error in the library or the compositor.
 	#[error("failed to dispatch event from wayland server")]
 	Dispatch(#[from] wayland_client::DispatchError),
-	/// Error thrown in the event of an unimplemented handler; hopefully this
-	/// will be removed soon.
+	/// Error thrown in the event of an unimplemented handler. This can occur
+	/// when the Wayland protocols used add another variant that is not handled
+	/// in this library.
 	#[error("{0}")]
 	Unimplemented(String),
 }
 
 /// This is the return type for the Ok variant of the capture functions. It
 /// contains the dimensions (width and height in pixels) of the capture and a
-/// `Vec` with the captured pixel data in the RGBA8888 big endian format.
-/// Remember that each pixel takes up 4 places in the `Vec`.
+/// `Vec` with the captured pixel data as [`rgb::RGBA8`] (see [`rgb::RGBA`]).
+/// This can be cast to a slice of `u8`s using the [`ComponentBytes`] trait.
 pub struct Capture
 {
 	/// The width of the capture in pixels.
@@ -50,14 +52,14 @@ pub struct Capture
 	/// The height of the capture in pixels.
 	pub height: usize,
 	/// The `Vec` containing the pixel data.
-	pub pixel_data: Vec<u8>,
+	pub pixel_data: Vec<rgb::RGBA8>,
 }
 
 // shared return type for capture functions
 type CaptureReturn = Result<Capture, crate::Error>;
 
 /// This function will capture the entirety of all outputs and composite them
-/// into a single Vec<u8>
+/// into the capture, accounting for transformations, offsets, and scaling.
 pub fn capture_all_outputs(include_cursor: bool) -> CaptureReturn
 {
 	let (mut state, mut event_queue) = backend::connect_and_get_output_info()?;
@@ -97,7 +99,7 @@ pub fn capture_all_outputs(include_cursor: bool) -> CaptureReturn
 }
 
 /// This function will capture the output specified in the `name` field of the
-/// arguments.
+/// arguments, returning an error if the name does not match an output.
 pub fn capture_output(name: &str, include_cursor: bool) -> CaptureReturn
 {
 	let (mut state, mut event_queue) = backend::connect_and_get_output_info()?;
@@ -149,8 +151,8 @@ pub fn capture_output(name: &str, include_cursor: bool) -> CaptureReturn
 /// This function will capture the region of the compositor specified by the
 /// `region_position` and `region_size` arguments. The `region_position` should
 /// be the top left corner of the region with the `region_size` expanding from
-/// there. This will be the same as the default output provided by
-/// <a href = "https://github.com/emersion/slurp" target = "_blank">slurp</a>.
+/// there; these values should be based on the compositor logical output
+/// positions and sizes. This will be the same as the default output provided by <a href = "https://github.com/emersion/slurp" target = "_blank">slurp</a>.
 pub fn capture_region(
 	region_position: (i32, i32),
 	region_size: (i32, i32),
@@ -196,9 +198,9 @@ pub fn capture_region(
 				image_position - output_info.output_logical_position.unwrap();
 
 			// 2 of the transforms seem to have their logical coordinates start in the
-			// bottom right instead of the top left, so this adjusts for that TODO determine
-			// if this is the expected behavior as it does not seem to be specified in the
-			// Wayland protocol docs
+			// bottom right instead of the top left, so this adjusts for that. TODO:
+			// determine if this is the expected behavior as it does not seem to be
+			// specified in the Wayland protocol docs
 			match output_info.transform.as_ref().unwrap()
 			{
 				wl_output::Transform::Normal
@@ -286,12 +288,14 @@ fn captures_to_buffer(output_infos: Vec<backend::OutputInfo>) -> CaptureReturn
 		})
 		.collect();
 
+	// init dimension values
 	let mut upper_left = output_captures[0].image_logical_position;
 	let mut bottom_right = rectangle::Position::new(
 		upper_left.x + output_captures[0].image_logical_size.width,
 		upper_left.y + output_captures[0].image_logical_size.height,
 	);
 
+	// loop over the other captures to determine the full dimensions
 	for capture in &output_captures[1..]
 	{
 		upper_left.x = cmp::min(capture.image_logical_position.x, upper_left.x);
@@ -314,7 +318,15 @@ fn captures_to_buffer(output_infos: Vec<backend::OutputInfo>) -> CaptureReturn
 		height: bottom_right.y - upper_left.y,
 	};
 
-	let mut buffer: Vec<u8> = vec![0; size.width as usize * size.height as usize * 4];
+	let mut buffer: Vec<rgb::RGBA8> = vec![
+		rgb::RGBA8 {
+			r: 0,
+			g: 0,
+			b: 0,
+			a: 0
+		};
+		size.width as usize * size.height as usize
+	];
 
 	for output_capture in output_captures.into_iter()
 	{
@@ -324,6 +336,7 @@ fn captures_to_buffer(output_infos: Vec<backend::OutputInfo>) -> CaptureReturn
 				* output_capture.image_logical_size.height as usize
 		];
 
+		// resize if needed, otherwise just use the current mmap
 		let image_buffer = if output_capture.image_mmap_size.width
 			!= output_capture.image_logical_size.width
 			|| output_capture.image_mmap_size.height != output_capture.image_logical_size.height
@@ -359,15 +372,11 @@ fn captures_to_buffer(output_infos: Vec<backend::OutputInfo>) -> CaptureReturn
 
 				let output_capture_index = output_capture_index as usize;
 
-				let index =
-					((position_offset.y + y) * (size.width * 4)) + ((position_offset.x + x) * 4);
+				let index = ((position_offset.y + y) * size.width) + (position_offset.x + x);
 
 				let index = index as usize;
 
-				buffer[index] = image_buffer[output_capture_index].r;
-				buffer[index + 1] = image_buffer[output_capture_index].g;
-				buffer[index + 2] = image_buffer[output_capture_index].b;
-				buffer[index + 3] = image_buffer[output_capture_index].a;
+				buffer[index] = image_buffer[output_capture_index];
 			}
 		}
 	}
