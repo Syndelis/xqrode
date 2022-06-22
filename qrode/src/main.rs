@@ -30,13 +30,13 @@ fn main()
 		capture.width as usize,
 		capture.height as usize,
 		move |x, y| {
-			let index = (y * capture.width * 4) + (x * 4);
+			let index = (y * capture.width) + x;
 
 			// average the rgb values for grayscale value
 			// must be divided individually
-			(capture.pixel_data[index] / 3)
-				+ (capture.pixel_data[index + 1] / 3)
-				+ (capture.pixel_data[index + 2] / 3)
+			(capture.pixel_data[index].r / 3)
+				+ (capture.pixel_data[index].g / 3)
+				+ (capture.pixel_data[index].b / 3)
 		},
 	);
 
