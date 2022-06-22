@@ -9,8 +9,8 @@ use rgb::FromSlice;
 use wayland_client::protocol::wl_output;
 
 mod backend;
-mod capture;
 mod rectangle;
+mod transform;
 
 /// Enum representing potential errors.
 #[derive(thiserror::Error, Debug)]
@@ -190,45 +190,46 @@ pub fn capture_region(
 		let image_size = output_info.image_logical_size.unwrap();
 
 		// adjust position to local output coordinates
-		let mut image_position_local =
-			image_position - output_info.output_logical_position.unwrap();
+		let image_position_local = {
+			// this is what the image_position_local should be
+			let image_position_local_normal =
+				image_position - output_info.output_logical_position.unwrap();
 
-		match output_info.transform.as_ref().unwrap()
-		{
-			wl_output::Transform::Normal =>
+			// 2 of the transforms seem to have their logical coordinates start in the
+			// bottom right instead of the top left, so this adjusts for that TODO determine
+			// if this is the expected behavior as it does not seem to be specified in the
+			// Wayland protocol docs
+			match output_info.transform.as_ref().unwrap()
 			{
-				// no adjustment needed
+				wl_output::Transform::Normal
+				| wl_output::Transform::_180
+				| wl_output::Transform::Flipped
+				| wl_output::Transform::Flipped270
+				| wl_output::Transform::Flipped90
+				| wl_output::Transform::Flipped180 => image_position_local_normal,
+				wl_output::Transform::_270 | wl_output::Transform::_90 =>
+				{
+					// transforms position so it starts at the logical top left
+					rectangle::Position::new(
+						-image_position_local_normal.x
+							+ output_info.output_logical_size.unwrap().width
+							- image_size.width,
+						-image_position_local_normal.y
+							+ output_info.output_logical_size.unwrap().height
+							- image_size.height,
+					)
+				}
+				_ =>
+				{
+					return Err(Error::Unimplemented(format!(
+						"output transform not implemented: {:?}",
+						output_info.transform.as_ref().unwrap()
+					)));
+				}
 			}
-			// TODO: handle other transforms (check docs for the flipped variants)
-			wl_output::Transform::_90 =>
-			{
-				// TODO
-			}
-			wl_output::Transform::_180 =>
-			{
-				// TODO
-			}
-			wl_output::Transform::_270 =>
-			{
-				// transforms position so it starts at the logical top left
-				// this transform causes (0, 0) to be at the bottom right of the monitor
-				image_position_local = rectangle::Position::new(
-					-image_position_local.x + output_info.output_logical_size.unwrap().width
-						- image_size.width,
-					-image_position_local.y + output_info.output_logical_size.unwrap().height
-						- image_size.height,
-				);
-			}
-			_ =>
-			{
-				return Err(crate::Error::Unimplemented(format!(
-					"Output transform not implemented: {:?}",
-					output_info.transform.as_ref().unwrap()
-				)));
-			}
-		}
+		};
 
-		// TODO: do not unwrap
+		// should not fail
 		state
 			.wlr_screencopy_manager
 			.as_ref()
@@ -236,8 +237,8 @@ pub fn capture_region(
 			.capture_output_region(
 				include_cursor as i32,
 				&output_info.wl_output,
-				image_position_local.x as i32,
-				image_position_local.y as i32,
+				image_position_local.x,
+				image_position_local.y,
 				image_size.width,
 				image_size.height,
 				&event_queue.handle(),
@@ -268,12 +269,13 @@ fn captures_to_buffer(output_infos: Vec<backend::OutputInfo>) -> CaptureReturn
 	let output_captures: Vec<backend::OutputCapture> = output_infos
 		.into_iter()
 		.map(|output_info| {
-			let (mmap_width, mmap_height, image_mmap) = capture::create_transform_corrected_buffer(
-				output_info.transform.unwrap(),
-				output_info.image_mmap.unwrap(),
-				output_info.image_mmap_size.unwrap(),
-				output_info.image_pixel_format.unwrap(),
-			);
+			let (mmap_width, mmap_height, image_mmap) =
+				transform::create_transform_corrected_buffer(
+					output_info.transform.unwrap(),
+					output_info.image_mmap.unwrap(),
+					output_info.image_mmap_size.unwrap(),
+					output_info.image_pixel_format.unwrap(),
+				);
 
 			backend::OutputCapture {
 				image_logical_position: output_info.image_logical_position.unwrap(),
