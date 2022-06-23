@@ -6,10 +6,15 @@ use clap::Parser;
 #[clap(name = "qrode")]
 #[clap(author = "redArch <redarch@protonmail.com>")]
 #[clap(version = "0.1.0")]
-#[clap(about = "QR code decoder tool for Wayland compositors", long_about = None)]
+#[clap(about = "QR code decoder tool for Wayland compositors. Works great with slurp.", long_about = None)]
 struct Cli
 {
-	#[clap(short('g'), value_parser, help("Set the region to capture"))]
+	#[clap(
+		short('g'),
+		value_parser,
+		value_names(&gazo::Region::get_parser_formats()),
+		help("Set the region to capture")
+	)]
 	geometry: gazo::Region,
 }
 
@@ -25,8 +30,8 @@ fn main()
 		move |x, y| {
 			let index = (y * capture.width) + x;
 
-			// average the rgb values for grayscale value
-			// must be divided individually
+			// average the rgb values for grayscale, value must be divided individually as
+			// total can exceed the size of a u8
 			(capture.pixel_data[index].r / 3)
 				+ (capture.pixel_data[index].g / 3)
 				+ (capture.pixel_data[index].b / 3)
@@ -38,8 +43,7 @@ fn main()
 	if grids.is_empty()
 	{
 		println!("No QR codes detected");
-
-		return;
+		std::process::exit(1);
 	}
 
 	for grid in grids

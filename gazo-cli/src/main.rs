@@ -1,7 +1,7 @@
 use std::{fs, path::PathBuf};
 
 use clap::Parser;
-use gazo::{ComponentBytes, Region};
+use gazo::ComponentBytes;
 
 #[derive(clap::Parser)]
 #[clap(name = "gazo")]
@@ -13,10 +13,11 @@ struct Cli
 	#[clap(
 		short('g'),
 		value_parser,
+		value_names(&gazo::Region::get_parser_formats()),
 		help("Set the region to capture"),
 		conflicts_with("output")
 	)]
-	geometry: Option<Region>,
+	geometry: Option<gazo::Region>,
 	#[clap(short('o'), value_parser, help("Set the output name to capture."))]
 	output: Option<String>,
 	#[clap(short('c'), action, help("Include cursors in the screenshot."))]
@@ -31,7 +32,7 @@ fn main()
 
 	let capture = match if cli.geometry.is_some()
 	{
-		let Region { position, size } = cli.geometry.unwrap();
+		let gazo::Region { position, size } = cli.geometry.unwrap();
 
 		gazo::capture_region(position, size, cli.cursor)
 	}
