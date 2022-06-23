@@ -1,6 +1,7 @@
 [workspace]
 members = [
 	"gazo",
+	"gazo-cli",
   "qrode",
 ]
 

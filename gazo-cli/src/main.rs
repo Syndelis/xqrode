@@ -1,11 +1,7 @@
 use std::{fs, path::PathBuf};
 
-use clap::{
-	builder::{self, TypedValueParser},
-	Parser,
-};
-use gazo::ComponentBytes;
-use regex::Regex;
+use clap::Parser;
+use gazo::{ComponentBytes, Region};
 
 #[derive(clap::Parser)]
 #[clap(name = "gazo")]
@@ -27,74 +23,6 @@ struct Cli
 	cursor: bool,
 	#[clap(value_parser, help("Location to save the image. Image type is PNG."))]
 	output_file: PathBuf,
-}
-
-#[derive(Clone)]
-struct Region
-{
-	position: (i32, i32),
-	size: (i32, i32),
-}
-
-impl builder::ValueParserFactory for Region
-{
-	type Parser = RegionValueParser;
-
-	fn value_parser() -> Self::Parser
-	{
-		RegionValueParser
-	}
-}
-
-#[derive(Clone)]
-struct RegionValueParser;
-
-impl TypedValueParser for RegionValueParser
-{
-	type Value = Region;
-
-	fn parse_ref(
-		&self,
-		_command: &clap::Command,
-		_argument: Option<&clap::Arg>,
-		value: &std::ffi::OsStr,
-	) -> Result<Self::Value, clap::Error>
-	{
-		if value.is_empty()
-		{
-			return Err(clap::Error::raw(
-				clap::ErrorKind::EmptyValue,
-				"The region argument must not be empty.",
-			));
-		}
-
-		let value = value.to_str().ok_or_else(|| {
-			clap::Error::raw(
-				clap::ErrorKind::InvalidUtf8,
-				"The argument containted invalid UTF-8 characters.",
-			)
-		})?;
-
-		let re = Regex::new(r"(-?\d+),(-?\d+) (\d+)x(\d+)").unwrap();
-
-		let captures = re.captures(value).ok_or_else(|| {
-			clap::Error::raw(
-				clap::ErrorKind::ValueValidation,
-				"The argument was malformed. Please use the format: '{x},{y} {width}x{height}'.",
-			)
-		})?;
-
-		let position = (
-			captures.get(1).unwrap().as_str().parse::<i32>().unwrap(),
-			captures.get(2).unwrap().as_str().parse::<i32>().unwrap(),
-		);
-		let size = (
-			captures.get(3).unwrap().as_str().parse::<i32>().unwrap(),
-			captures.get(4).unwrap().as_str().parse::<i32>().unwrap(),
-		);
-
-		Ok(Region { position, size })
-	}
 }
 
 fn main()

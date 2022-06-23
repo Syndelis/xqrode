@@ -10,8 +10,13 @@ use rgb::FromSlice;
 use wayland_client::protocol::wl_output;
 
 mod backend;
+#[cfg(feature = "clap-region-parsing")]
+mod clap;
 mod rectangle;
 mod transform;
+
+#[cfg(feature = "clap-region-parsing")]
+pub use crate::clap::Region;
 
 /// Enum representing potential errors.
 #[derive(thiserror::Error, Debug)]
