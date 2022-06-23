@@ -1,3 +1,4 @@
+// this module contains the Region type, which implements parsing for clap
 use clap::builder::{self, TypedValueParser};
 use regex::Regex;
 
@@ -16,6 +17,15 @@ pub struct Region
 	/// can be used directly as the size argument for
 	/// [capture_region](crate::capture_region)
 	pub size: (i32, i32),
+}
+
+impl Region
+{
+	/// Returns a slice of formats that can be parsed into a [`Region`].
+	pub const fn get_parser_formats() -> [&'static str; 1]
+	{
+		["{x},{y} {width}x{height}"]
+	}
 }
 
 impl builder::ValueParserFactory for Region
