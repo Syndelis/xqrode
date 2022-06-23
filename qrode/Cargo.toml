@@ -4,12 +4,10 @@ version = "0.1.0"
 edition = "2021"
 license = "GPL-3.0-or-later"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [dependencies]
-gazo = {version = "0.1.0", path = "../gazo"}
+gazo = {version = "0.1.0", path = "../gazo", features = ["clap-region-parsing"]}
+clap = {version = "3.2.1", features = ["derive"]}
 rqrr = "0.5.1"
-regex = "1.5.6"
 image = "0.24.2"
 url = "2.2.2"
 open = "2.1.3"

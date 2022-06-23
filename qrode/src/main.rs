@@ -1,30 +1,23 @@
-use std::io::{self, Write};
+use std::io::Write;
 
-use regex::Regex;
+use clap::Parser;
+
+#[derive(Parser)]
+#[clap(name = "qrode")]
+#[clap(author = "redArch <redarch@protonmail.com>")]
+#[clap(version = "0.1.0")]
+#[clap(about = "QR code decoder tool for Wayland compositors", long_about = None)]
+struct Cli
+{
+	#[clap(short('g'), value_parser, help("Set the region to capture"))]
+	geometry: gazo::Region,
+}
 
 fn main()
 {
-	let mut buffer = String::new();
-	let stdin = io::stdin();
+	let cli = Cli::parse();
 
-	stdin
-		.read_line(&mut buffer)
-		.expect("Failed to read from stdin.");
-
-	let re = Regex::new(r"(-?\d+),(-?\d+) (\d+)x(\d+)").unwrap();
-
-	let captures = re.captures(&buffer).expect("Failed to parse input.");
-
-	let position = (
-		captures.get(1).unwrap().as_str().parse::<i32>().unwrap(),
-		captures.get(2).unwrap().as_str().parse::<i32>().unwrap(),
-	);
-	let size = (
-		captures.get(3).unwrap().as_str().parse::<i32>().unwrap(),
-		captures.get(4).unwrap().as_str().parse::<i32>().unwrap(),
-	);
-
-	let capture = gazo::capture_region(position, size, false).unwrap();
+	let capture = gazo::capture_region(cli.geometry.position, cli.geometry.size, false).unwrap();
 
 	let mut prepared_image = rqrr::PreparedImage::prepare_from_greyscale(
 		capture.width as usize,
