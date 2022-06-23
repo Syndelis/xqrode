@@ -1,6 +1,9 @@
 use std::{fs, path::PathBuf};
 
-use clap::Parser;
+use clap::{
+	builder::{self, TypedValueParser},
+	Parser,
+};
 use gazo::ComponentBytes;
 use regex::Regex;
 
@@ -17,7 +20,7 @@ struct Cli
 		help("Set the region to capture"),
 		conflicts_with("output")
 	)]
-	geometry: Option<String>,
+	geometry: Option<Region>,
 	#[clap(short('o'), value_parser, help("Set the output name to capture."))]
 	output: Option<String>,
 	#[clap(short('c'), action, help("Include cursors in the screenshot."))]
@@ -26,18 +29,60 @@ struct Cli
 	output_file: PathBuf,
 }
 
-fn main()
+#[derive(Clone)]
+struct Region
 {
-	let cli = Cli::parse();
+	position: (i32, i32),
+	size: (i32, i32),
+}
 
-	let capture = match if cli.geometry.is_some()
+impl builder::ValueParserFactory for Region
+{
+	type Parser = RegionValueParser;
+
+	fn value_parser() -> Self::Parser
 	{
-		// TODO parse geometry using clap
+		RegionValueParser
+	}
+}
+
+#[derive(Clone)]
+struct RegionValueParser;
+
+impl TypedValueParser for RegionValueParser
+{
+	type Value = Region;
+
+	fn parse_ref(
+		&self,
+		_command: &clap::Command,
+		_argument: Option<&clap::Arg>,
+		value: &std::ffi::OsStr,
+	) -> Result<Self::Value, clap::Error>
+	{
+		if value.is_empty()
+		{
+			return Err(clap::Error::raw(
+				clap::ErrorKind::EmptyValue,
+				"The region argument must not be empty.",
+			));
+		}
+
+		let value = value.to_str().ok_or_else(|| {
+			clap::Error::raw(
+				clap::ErrorKind::InvalidUtf8,
+				"The argument containted invalid UTF-8 characters.",
+			)
+		})?;
+
 		let re = Regex::new(r"(-?\d+),(-?\d+) (\d+)x(\d+)").unwrap();
 
-		let captures = re
-			.captures(cli.geometry.as_ref().unwrap())
-			.expect("Failed to parse geometry.");
+		let captures = re.captures(value).ok_or_else(|| {
+			clap::Error::raw(
+				clap::ErrorKind::ValueValidation,
+				"The argument was malformed. Please use the format: '{x},{y} {width}x{height}'.",
+			)
+		})?;
 
 		let position = (
 			captures.get(1).unwrap().as_str().parse::<i32>().unwrap(),
@@ -47,6 +92,18 @@ fn main()
 			captures.get(3).unwrap().as_str().parse::<i32>().unwrap(),
 			captures.get(4).unwrap().as_str().parse::<i32>().unwrap(),
 		);
+
+		Ok(Region { position, size })
+	}
+}
+
+fn main()
+{
+	let cli = Cli::parse();
+
+	let capture = match if cli.geometry.is_some()
+	{
+		let Region { position, size } = cli.geometry.unwrap();
 
 		gazo::capture_region(position, size, cli.cursor)
 	}
