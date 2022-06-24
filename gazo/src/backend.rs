@@ -1,3 +1,4 @@
+// this module handles most of the wayland compositor communication
 use std::{ffi, fs, os::unix::io::FromRawFd};
 
 use nix::sys::memfd;
@@ -13,10 +14,7 @@ use wayland_protocols_wlr::screencopy::v1::client::{
 
 use crate::rectangle;
 
-// all coordinates in this crate are absolute in the compositor coordinate space
-// unless otherwise specified as local
-
-#[derive(Debug)]
+// represents a wayland output
 pub(crate) struct OutputInfo
 {
 	pub wl_output: wl_output::WlOutput,
@@ -34,15 +32,7 @@ pub(crate) struct OutputInfo
 	pub image_ready: bool,
 }
 
-#[derive(Debug)]
-pub(crate) struct OutputCapture
-{
-	pub image_logical_position: rectangle::Position,
-	pub image_logical_size: rectangle::Size,
-	pub image_mmap: memmap2::MmapMut,
-	pub image_mmap_size: rectangle::Size,
-}
-
+// a state that stores relevant information and dispatches events
 pub(crate) struct State
 {
 	pub done: bool,
@@ -52,6 +42,7 @@ pub(crate) struct State
 	pub output_infos: Vec<OutputInfo>,
 }
 
+// bind globals to State
 impl Dispatch<wl_registry::WlRegistry, ()> for State
 {
 	fn event(
@@ -174,6 +165,7 @@ impl Dispatch<wl_output::WlOutput, usize> for State
 		_queue_handle: &QueueHandle<Self>,
 	)
 	{
+		// store relevant information in the output_info
 		match event
 		{
 			wl_output::Event::Geometry { transform, .. } =>
@@ -401,6 +393,7 @@ impl Dispatch<zxdg_output_manager_v1::ZxdgOutputManagerV1, ()> for State
 }
 // end unused dispatches //
 
+// function to initialize a State and its OutputInfo Vec
 pub(crate) fn connect_and_get_output_info(
 ) -> Result<(State, wayland_client::EventQueue<State>), crate::Error>
 {

@@ -13,6 +13,7 @@ struct Cli
 		short('g'),
 		value_parser,
 		value_names(&gazo::Region::get_parser_formats()),
+		allow_hyphen_values(true),
 		help("Set the region to capture")
 	)]
 	geometry: gazo::Region,
@@ -48,13 +49,19 @@ fn main()
 
 	for grid in grids
 	{
-		let (_, data) = grid.decode().unwrap();
+		let (_, data) = grid.decode().unwrap_or_else(|error| {
+			eprintln!("There was a problem decoding the QR code: {}", error);
+			std::process::exit(1);
+		});
 
 		match url::Url::parse(&data)
 		{
 			Ok(url) =>
 			{
-				open::that(url.as_str()).expect("Failed to open URL with default application.")
+				open::that(url.as_str()).unwrap_or_else(|error| {
+					eprintln!("Failed to open URL with default application: {}", error);
+					std::process::exit(1);
+				});
 			}
 			Err(_) =>
 			{
@@ -62,8 +69,13 @@ fn main()
 
 				write!(tempfile.as_file(), "{}", data).unwrap();
 
-				open::that(tempfile.path())
-					.expect("Failed to open the QR code data with default application.");
+				open::that(tempfile.path()).unwrap_or_else(|error| {
+					eprintln!(
+						"Failed to open the QR code text with default application: {}",
+						error
+					);
+					std::process::exit(1);
+				});
 			}
 		}
 	}

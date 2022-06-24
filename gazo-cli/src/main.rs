@@ -6,7 +6,7 @@ use gazo::ComponentBytes;
 #[derive(clap::Parser)]
 #[clap(name = "gazo")]
 #[clap(author = "redArch <redarch@protonmail.com>")]
-#[clap(version = "0.0.1")]
+#[clap(version = "0.0.2")]
 #[clap(about = "Screenshot tool for Wayland compositors", long_about = None)]
 struct Cli
 {
@@ -14,6 +14,7 @@ struct Cli
 		short('g'),
 		value_parser,
 		value_names(&gazo::Region::get_parser_formats()),
+		allow_hyphen_values(true),
 		help("Set the region to capture"),
 		conflicts_with("output")
 	)]
@@ -30,6 +31,7 @@ fn main()
 {
 	let cli = Cli::parse();
 
+	// get a capture based on the arguments provided
 	let capture = match if cli.geometry.is_some()
 	{
 		let gazo::Region { position, size } = cli.geometry.unwrap();
@@ -53,8 +55,13 @@ fn main()
 		}
 	};
 
-	let file = fs::File::create(cli.output_file).unwrap();
+	// create file to store image
+	let file = fs::File::create(cli.output_file).unwrap_or_else(|_| {
+		eprintln!("Failed to create the output file.");
+		std::process::exit(1);
+	});
 
+	// encode to PNG in the file
 	let mut encoder = mtpng::encoder::Encoder::new(file, &mtpng::encoder::Options::new());
 
 	let mut header = mtpng::Header::new();

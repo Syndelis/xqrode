@@ -1,7 +1,10 @@
+// this module implements an intersection function for determining the overlap
+// of 2 rectangles
+
 use std::ops::{Add, Sub};
 
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]
-pub struct Position
+pub(crate) struct Position
 {
 	pub x: i32,
 	pub y: i32,
@@ -9,7 +12,7 @@ pub struct Position
 
 impl Position
 {
-	pub fn new(x: i32, y: i32) -> Self
+	pub(crate) fn new(x: i32, y: i32) -> Self
 	{
 		Position { x, y }
 	}
@@ -42,10 +45,10 @@ impl Sub for Position
 }
 
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]
-pub struct Size
+pub(crate) struct Size
 {
-	pub width: i32,
-	pub height: i32,
+	pub(crate) width: i32,
+	pub(crate) height: i32,
 }
 
 impl Size
@@ -83,20 +86,20 @@ impl Sub for Size
 }
 
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]
-pub struct Rectangle
+pub(crate) struct Rectangle
 {
-	pub position: Position,
-	pub size: Size,
+	pub(crate) position: Position,
+	pub(crate) size: Size,
 }
 
 impl Rectangle
 {
-	pub fn new(position: Position, size: Size) -> Self
+	pub(crate) fn new(position: Position, size: Size) -> Self
 	{
 		Rectangle { position, size }
 	}
 
-	pub fn get_intersection(self, rectangle: Rectangle) -> Option<Rectangle>
+	pub(crate) fn get_intersection(self, rectangle: Rectangle) -> Option<Rectangle>
 	{
 		let mut intersecting_rectangle = Rectangle {
 			position: Position { x: 0, y: 0 },

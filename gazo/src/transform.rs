@@ -1,5 +1,9 @@
+// this module implements transforming a buffer to its logical representation
+// and the RGBA8 pixel format
+
 use wayland_client::protocol::{wl_output, wl_shm};
 
+// TODO: perform transformation in place using swaps and maybe parallelize
 pub(crate) fn create_transform_corrected_buffer(
 	transform: wl_output::Transform,
 	image_mmap: memmap2::MmapMut,

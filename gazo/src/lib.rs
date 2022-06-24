@@ -48,7 +48,7 @@ pub enum Error
 
 /// This is the return type for the Ok variant of the capture functions. It
 /// contains the dimensions (width and height in pixels) of the capture and a
-/// `Vec` with the captured pixel data as [`rgb::RGBA8`] (see [`rgb::RGBA`]).
+/// `Vec` with the captured pixel data as [`rgb::RGBA8`].
 /// This can be cast to a slice of `u8`s using the [`ComponentBytes`] trait.
 pub struct Capture
 {
@@ -59,6 +59,9 @@ pub struct Capture
 	/// The `Vec` containing the pixel data.
 	pub pixel_data: Vec<rgb::RGBA8>,
 }
+
+// all coordinates in this crate are absolute in the compositor coordinate space
+// unless otherwise specified as local
 
 // shared return type for capture functions
 type CaptureReturn = Result<Capture, crate::Error>;
@@ -109,21 +112,18 @@ pub fn capture_output(name: &str, include_cursor: bool) -> CaptureReturn
 {
 	let (mut state, mut event_queue) = backend::connect_and_get_output_info()?;
 
-	state.output_infos = state
-		.output_infos
-		.into_iter()
-		.filter(|output_info| {
-			if output_info.name.as_ref().unwrap() == name
-			{
-				true
-			}
-			else
-			{
-				output_info.wl_output.release();
-				false
-			}
-		})
-		.collect();
+	// filter to matching output
+	state.output_infos.retain_mut(|output_info| {
+		if output_info.name.as_ref().unwrap() == name
+		{
+			true
+		}
+		else
+		{
+			output_info.wl_output.release();
+			false
+		}
+	});
 
 	if state.output_infos.is_empty()
 	{
@@ -186,7 +186,11 @@ pub fn capture_region(
 
 				true
 			}
-			None => false,
+			None =>
+			{
+				output_info.wl_output.release();
+				false
+			}
 		}
 	});
 
@@ -266,6 +270,15 @@ pub fn capture_region(
 	captures_to_buffer(state.output_infos)
 }
 
+// used to store the needed information for the final composite
+struct OutputCapture
+{
+	pub image_logical_position: rectangle::Position,
+	pub image_logical_size: rectangle::Size,
+	pub image_mmap: memmap2::MmapMut,
+	pub image_mmap_size: rectangle::Size,
+}
+
 fn captures_to_buffer(output_infos: Vec<backend::OutputInfo>) -> CaptureReturn
 {
 	if output_infos.is_empty()
@@ -273,7 +286,7 @@ fn captures_to_buffer(output_infos: Vec<backend::OutputInfo>) -> CaptureReturn
 		return Err(crate::Error::NoCaptures);
 	}
 
-	let output_captures: Vec<backend::OutputCapture> = output_infos
+	let output_captures: Vec<OutputCapture> = output_infos
 		.into_iter()
 		.map(|output_info| {
 			let (mmap_width, mmap_height, image_mmap) =
@@ -284,7 +297,7 @@ fn captures_to_buffer(output_infos: Vec<backend::OutputInfo>) -> CaptureReturn
 					output_info.image_pixel_format.unwrap(),
 				);
 
-			backend::OutputCapture {
+			OutputCapture {
 				image_logical_position: output_info.image_logical_position.unwrap(),
 				image_logical_size: output_info.image_logical_size.unwrap(),
 				image_mmap,
@@ -293,7 +306,7 @@ fn captures_to_buffer(output_infos: Vec<backend::OutputInfo>) -> CaptureReturn
 		})
 		.collect();
 
-	// init dimension values
+	// init dimension values for final composite size
 	let mut upper_left = output_captures[0].image_logical_position;
 	let mut bottom_right = rectangle::Position::new(
 		upper_left.x + output_captures[0].image_logical_size.width,
@@ -318,12 +331,14 @@ fn captures_to_buffer(output_infos: Vec<backend::OutputInfo>) -> CaptureReturn
 		);
 	}
 
+	// calculate the size of the composite image
 	let size = rectangle::Size {
 		width: bottom_right.x - upper_left.x,
 		height: bottom_right.y - upper_left.y,
 	};
 
-	let mut buffer: Vec<rgb::RGBA8> = vec![
+	// init a buffer to store the composite image data as RGBA8
+	let mut composite_buffer: Vec<rgb::RGBA8> = vec![
 		rgb::RGBA8 {
 			r: 0,
 			g: 0,
@@ -335,17 +350,24 @@ fn captures_to_buffer(output_infos: Vec<backend::OutputInfo>) -> CaptureReturn
 
 	for output_capture in output_captures.into_iter()
 	{
-		let mut destination = vec![
-			rgb::RGBA::<u8>::new(0, 0, 0, 0);
-			output_capture.image_logical_size.width as usize
-				* output_capture.image_logical_size.height as usize
-		];
+		let mut destination: Vec<rgb::RGBA8>;
 
 		// resize if needed, otherwise just use the current mmap
 		let image_buffer = if output_capture.image_mmap_size.width
 			!= output_capture.image_logical_size.width
 			|| output_capture.image_mmap_size.height != output_capture.image_logical_size.height
 		{
+			destination = vec![
+				rgb::RGBA8 {
+					r: 0,
+					g: 0,
+					b: 0,
+					a: 0
+				};
+				output_capture.image_logical_size.width as usize
+					* output_capture.image_logical_size.height as usize
+			];
+
 			let mut resizer = resize::Resizer::new(
 				output_capture.image_mmap_size.width as usize,
 				output_capture.image_mmap_size.height as usize,
@@ -367,6 +389,7 @@ fn captures_to_buffer(output_infos: Vec<backend::OutputInfo>) -> CaptureReturn
 			output_capture.image_mmap.as_rgba()
 		};
 
+		// calculate the offset of the output relative to the final composite image
 		let position_offset = output_capture.image_logical_position - upper_left;
 
 		for y in 0..output_capture.image_logical_size.height
@@ -381,7 +404,7 @@ fn captures_to_buffer(output_infos: Vec<backend::OutputInfo>) -> CaptureReturn
 
 				let index = index as usize;
 
-				buffer[index] = image_buffer[output_capture_index];
+				composite_buffer[index] = image_buffer[output_capture_index];
 			}
 		}
 	}
@@ -389,6 +412,6 @@ fn captures_to_buffer(output_infos: Vec<backend::OutputInfo>) -> CaptureReturn
 	Ok(Capture {
 		width: size.width as usize,
 		height: size.height as usize,
-		pixel_data: buffer,
+		pixel_data: composite_buffer,
 	})
 }

@@ -1,11 +1,10 @@
 [package]
 name = "gazo-cli"
-version = "0.1.0"
+version = "0.0.2"
 edition = "2021"
 license = "GPL-3.0-or-later"
 
 [dependencies]
-gazo = {version = "0.1.0", path = "../gazo", features = ["clap-region-parsing"]}
+gazo = {version = "0.0.2", path = "../gazo", features = ["clap-region-parsing"]}
 clap = {version = "3.2.1", features = ["derive"]}
-resize = "0.7.3"
 mtpng = "0.3.5"

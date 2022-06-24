@@ -6,7 +6,7 @@ use regex::Regex;
 /// in the form `{x},{y} {width}x{height}` (this is the default format of
 /// <a href = "https://github.com/emersion/slurp" target = "_blank">slurp</a>). Enable the `clap-region-parsing` feature to use this struct, then
 /// give it to clap as an argument type and it will parse it.
-#[derive(Clone)]
+#[derive(Copy, Clone)]
 pub struct Region
 {
 	/// The position of the top left corner of the region. This can be used
@@ -21,7 +21,7 @@ pub struct Region
 
 impl Region
 {
-	/// Returns a slice of formats that can be parsed into a [`Region`].
+	/// Returns a slice of formats that can be parsed into a [`Region`] by clap.
 	pub const fn get_parser_formats() -> [&'static str; 1]
 	{
 		["{x},{y} {width}x{height}"]
@@ -67,15 +67,16 @@ impl TypedValueParser for RegionValueParser
 			)
 		})?;
 
-		let re = Regex::new(r"(-?\d+),(-?\d+) (\d+)x(\d+)").unwrap();
+		let regex = Regex::new(r"(-?\d+),(-?\d+) (\d+)x(\d+)").unwrap();
 
-		let captures = re.captures(value).ok_or_else(|| {
+		let captures = regex.captures(value).ok_or_else(|| {
 			clap::Error::raw(
 				clap::ErrorKind::ValueValidation,
 				"The argument was malformed. Please use the format: '{x},{y} {width}x{height}'.",
 			)
 		})?;
 
+		// should be safe to unwrap as the regex should only match on valid numbers
 		let position = (
 			captures.get(1).unwrap().as_str().parse::<i32>().unwrap(),
 			captures.get(2).unwrap().as_str().parse::<i32>().unwrap(),
