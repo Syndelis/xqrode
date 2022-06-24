@@ -42,6 +42,8 @@ Qrode works best with <a href = "https://github.com/emersion/slurp" target = "_b
 qrode -g "$(slurp)"
 ```
 
+![Example usage of qrode in a GIF](/qrode_example.gif)
+
 Gazo-cli partially emulates grim in terms of its arguments, but it is not a complete drop in replacement (although that may or may not change). See below for example uses.
 
 ```bash
