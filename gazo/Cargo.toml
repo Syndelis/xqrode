@@ -3,6 +3,8 @@ name = "gazo"
 version = "0.0.2"
 edition = "2021"
 license = "GPL-3.0-or-later"
+description = "Gazo is a library to get a screen capture from Wayland compositors implementing the wlr_screencopy protocol, like Sway."
+repository = "https://gitlab.com/redArch/wayland-screencopy-utilities"
 
 [features]
 clap-region-parsing = ["dep:clap", "dep:regex"]
