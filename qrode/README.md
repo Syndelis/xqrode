@@ -1,0 +1,1 @@
+This package is a rework of [QRode](https://gitlab.com/redArch/wayland-screencopy-utilities) by `Will <redarch@protonmail.com>` with the objective of porting it to X11.

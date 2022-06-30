@@ -1,12 +1,13 @@
 [package]
-name = "qrode"
+name = "xqrode"
+authors = ["Will <redarch@protonmail.com>", "novenary <streetwalkermc@gmail.com>", "Brenno Lemos <brenno@syndel.is>"]
 version = "0.1.0"
 edition = "2021"
 license = "GPL-3.0-or-later"
 
 [dependencies]
-gazo = {version = "0.0.2", path = "../gazo", features = ["clap-region-parsing"]}
 clap = {version = "3.2.1", features = ["derive"]}
+libshotgun = {version = "2.2.1", path="../libshotgun"}
 rqrr = "0.5.1"
 url = "2.2.2"
 open = "2.1.3"

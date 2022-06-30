@@ -1,9 +1,10 @@
 use std::io::Write;
 
 use clap::Parser;
+use libshotgun::{self, image, Rect};
 
 #[derive(Parser)]
-#[clap(name = "qrode")]
+#[clap(name = "x11qrode")]
 #[clap(author = "redArch <redarch@protonmail.com>")]
 #[clap(version = "0.1.0")]
 #[clap(about = "QR code decoder tool for Wayland compositors. Works great with slurp.", long_about = None)]
@@ -12,39 +13,53 @@ struct Cli
 	#[clap(
 		short('g'),
 		value_parser,
-		value_names(&gazo::Region::get_parser_formats()),
+		value_names(&libshotgun::Rect::get_parser_formats()),
 		allow_hyphen_values(true),
 		help("Set the region to capture")
 	)]
-	geometry: gazo::Region,
+	geometry: libshotgun::Rect,
 }
 
-fn main()
-{
+fn main() {
 	let cli = Cli::parse();
 
-	let capture = gazo::capture_region(cli.geometry.position, cli.geometry.size, false).unwrap();
+	let rect = cli.geometry;
+	let mut image = libshotgun::capture_region(rect);
+
+	if !get_qr(&image, rect) {
+		image.invert();
+		if !get_qr(&image, rect) {
+			println!("No QR code found.");
+			return;
+		}
+	}
+
+}
+
+fn get_qr(image: &image::DynamicImage, rect: Rect) -> bool {
+
+	let image_buffer = image.to_rgb8();
 
 	let mut prepared_image = rqrr::PreparedImage::prepare_from_greyscale(
-		capture.width as usize,
-		capture.height as usize,
+		rect.w as usize,
+		rect.h as usize,
 		move |x, y| {
-			let index = (y * capture.width) + x;
 
 			// average the rgb values for grayscale, value must be divided individually as
 			// total can exceed the size of a u8
-			(capture.pixel_data[index].r / 3)
-				+ (capture.pixel_data[index].g / 3)
-				+ (capture.pixel_data[index].b / 3)
+
+			let rgb = image_buffer.get_pixel(x as u32, y as u32).0;
+			(rgb[0] / 3)
+			+ (rgb[1] / 3)
+			+ (rgb[2] / 3)
+
 		},
 	);
 
 	let grids = prepared_image.detect_grids();
 
-	if grids.is_empty()
-	{
-		println!("No QR codes detected");
-		std::process::exit(1);
+	if grids.is_empty() {
+		return false;
 	}
 
 	for grid in grids
@@ -79,4 +94,7 @@ fn main()
 			}
 		}
 	}
+
+	true
+
 }

@@ -1,0 +1,1 @@
+This package is a re-distribution of [shotgun](https://github.com/neXromancers/shotgun) by `novenary <streetwalkermc@gmail.com>` as a library.
